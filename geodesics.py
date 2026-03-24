@@ -154,60 +154,43 @@ class Polynomial_3(CurveMethod):
         return curve_points
 
 
-if __name__ == "__main__":
-    # 1. Setup
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}\n")
+def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None):
+    """
+    Calculates and plots geodesics on the latent space of a VAE.
 
-    # 1.1. Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Optimize a curve's energy using different metrics and curve representations.")
-    parser.add_argument('--vae_model_path', type=str, default='exp/model.pt',
-                        help='Path to the trained VAE model state_dict.')
-    parser.add_argument('--latent-dim', type=int, default=2, help='Dimension of the VAE latent space (M).')
-    parser.add_argument('--curve_method', type=str, default='piecewise', choices=['piecewise', 'polynomial'],
-                        help='Choose the curve representation: "piecewise" (Piecewise) or "polynomial" (Polynomial_3).')
-    parser.add_argument('--num_iterations', type=int, default=300,
-                        help='Number of optimization iterations.')
-    parser.add_argument('--lr', type=float, default=0.05,
-                        help='Learning rate for the optimizer.')
-    parser.add_argument('--N', type=int, default=30,
-                        help='Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic).')
-    parser.add_argument('--num_geodesics_to_plot', type=int, default=25,
-                        help='Number of geodesics (pairs of points) to calculate and plot.')
-
-    args = parser.parse_args()
-
-    # 1.2. Load VAE model and extract decoder
-    M = args.latent_dim
-    # Instantiate VAE components using the copied new_encoder_net and new_decoder_net
-    prior = GaussianPrior(M)
-    decoder_module = GaussianDecoder(new_decoder_net(M))
-    encoder_module = GaussianEncoder(new_encoder_net(M))
-
-    model = VAE(prior, decoder_module, encoder_module).to(device)
-    model.load_state_dict(torch.load(args.vae_model_path, map_location=device))
+    Args:
+        model (VAE): The trained VAE model.
+        device (str): The device to run computations on ('cpu' or 'cuda').
+        M (int): The dimension of the latent space.
+        curve_method_str (str): The curve representation method ('piecewise' or 'polynomial').
+        num_iterations (int): Number of optimization iterations.
+        lr (float): Learning rate for the optimizer.
+        N (int): Number of intermediate points or coefficients for the curve method.
+        num_geodesics_to_plot (int): Number of geodesics to calculate and plot.
+        output_filename (str, optional): If provided, saves the plot to this file. Defaults to None.
+    """
     model.eval() # Set model to evaluation mode
 
     decoder = model.decoder # This is the GaussianDecoder instance
     cbar_label = 'L2 Norm of Reconstructed Image' # Update label for background plot
 
-    # 1.3. Determine curve_method class and N value
-    if args.curve_method == 'piecewise':
+    # Determine curve_method class and N value
+    if curve_method_str == 'piecewise':
         curve_class = Piecewise
-        N_val = args.N
-    elif args.curve_method == 'polynomial':
+        N_val = N
+    elif curve_method_str == 'polynomial':
         curve_class = Polynomial_3
-        if args.N != 2:
-            print(f"Warning: Polynomial_3 requires N=2, but got N={args.N}. Setting N=2.")
+        if N != 2:
+            print(f"Warning: Polynomial_3 requires N=2, but got N={N}. Setting N=2.")
             N_val = 2
         else:
-            N_val = args.N
+            N_val = N
     else:
-        raise ValueError(f"Unknown curve method: {args.curve_method}")
+        raise ValueError(f"Unknown curve method: {curve_method_str}")
 
     # Generate random latent points for all start and end points of the geodesics
     # We need 2 * num_geodesics_to_plot individual points
-    all_latent_points = torch.randn(2 * args.num_geodesics_to_plot, M, device=device)
+    all_latent_points = torch.randn(2 * num_geodesics_to_plot, M, device=device)
 
     # 4. Plot Results
     plt.figure(figsize=(10, 8))
@@ -236,7 +219,7 @@ if __name__ == "__main__":
     # Iterate through the specified number of pairs and compute geodesics
     first_geodesic_plotted = False # Flag to ensure 'Optimized Geodesics' label appears only once in legend
     # Loop num_geodesics_to_plot times, taking two points from all_latent_points for each geodesic
-    for i in tqdm(range(args.num_geodesics_to_plot), desc="Calculating Geodesics"):
+    for i in tqdm(range(num_geodesics_to_plot), desc="Calculating Geodesics"):
         x1 = all_latent_points[2 * i]
         x2 = all_latent_points[2 * i + 1]
 
@@ -248,18 +231,69 @@ if __name__ == "__main__":
             decoder=decoder,
             curve_method_instance=curve_method,
             optimizer_class=optim.Adam,
-            lr=args.lr
+            lr=lr
         )
-        optimized_curve_points = minimizer.minimize_energy(num_iterations=args.num_iterations).detach().cpu().numpy()
+        optimized_curve_points = minimizer.minimize_energy(num_iterations=num_iterations).detach().cpu().numpy()
 
         # Plot optimized curve for this pair
         plt.plot(optimized_curve_points[:, 0], optimized_curve_points[:, 1], 'w-', linewidth=1.5, alpha=0.7, label='Optimized Geodesics' if not first_geodesic_plotted else "")
         first_geodesic_plotted = True # Only add label once for the legend
 
-    plt.title(f'{args.num_geodesics_to_plot} Geodesics between Random Pairs with {curve_class.__name__} and VAE Decoder')
+    plt.title(f'{num_geodesics_to_plot} Geodesics between Random Pairs with {curve_class.__name__} and VAE Decoder')
     plt.xlabel('x-axis')
     plt.ylabel('y-axis')
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.axis('equal')
+
+    if output_filename:
+        plt.savefig(output_filename)
+        print(f"Plot saved to {output_filename}")
+
     plt.show()
+
+if __name__ == "__main__":
+    # 1. Setup
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}\n")
+
+    # 1.1. Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Optimize a curve's energy using different metrics and curve representations.")
+    parser.add_argument('--vae_model_path', type=str, default='experiment/model.pt',
+                        help='Path to the trained VAE model state_dict.')
+    parser.add_argument('--latent-dim', type=int, default=2, help='Dimension of the VAE latent space (M).')
+    parser.add_argument('--curve_method', type=str, default='piecewise', choices=['piecewise', 'polynomial'],
+                        help='Choose the curve representation: "piecewise" (Piecewise) or "polynomial" (Polynomial_3).')
+    parser.add_argument('--num_iterations', type=int, default=300,
+                        help='Number of optimization iterations.')
+    parser.add_argument('--lr', type=float, default=0.05,
+                        help='Learning rate for the optimizer.')
+    parser.add_argument('--N', type=int, default=30,
+                        help='Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic).')
+    parser.add_argument('--num_geodesics_to_plot', type=int, default=25,
+                        help='Number of geodesics (pairs of points) to calculate and plot.')
+    parser.add_argument('--output_filename', type=str, default='geodesics_standalone.png',
+                        help='Filename to save the plot.')
+
+    args = parser.parse_args()
+
+    # 1.2. Load VAE model
+    M = args.latent_dim
+    # Instantiate VAE components using the copied new_encoder_net and new_decoder_net
+    prior = GaussianPrior(M)
+    decoder_module = GaussianDecoder(new_decoder_net(M))
+    encoder_module = GaussianEncoder(new_encoder_net(M))
+    model = VAE(prior, decoder_module, encoder_module).to(device)
+    model.load_state_dict(torch.load(args.vae_model_path, map_location=device))
+    
+    calculate_and_plot_geodesics(
+        model=model,
+        device=device,
+        M=args.latent_dim,
+        curve_method_str=args.curve_method,
+        num_iterations=args.num_iterations,
+        lr=args.lr,
+        N=args.N,
+        num_geodesics_to_plot=args.num_geodesics_to_plot,
+        output_filename=args.output_filename
+    )

@@ -283,14 +283,40 @@ if __name__ == "__main__":
         metavar="N",
         help="number of geodesics to plot (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-t",  # number of points along the curve
-        type=int,
-        default=20,
-        metavar="N",
-        help="number of points along the curve (default: %(default)s)",
-    )
 
+    # Arguments for geodesics calculation
+    parser.add_argument(
+        "--N",
+        type=int,
+        default=30,
+        metavar="N",
+        help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
+    )
+    parser.add_argument(
+        '--curve-method', 
+        type=str, 
+        default='piecewise', 
+        choices=['piecewise', 'polynomial'],
+        help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)'
+    )
+    parser.add_argument(
+        '--num-iterations', 
+        type=int, 
+        default=300,
+        help='Number of optimization iterations for geodesics. (default: %(default)s)'
+    )
+    parser.add_argument(
+        '--lr', 
+        type=float, 
+        default=0.05,
+        help='Learning rate for the geodesic optimizer. (default: %(default)s)'
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default="experiment/geodesics.png",
+        help="file to save the geodesics plot in (default: %(default)s)",
+    )
     args = parser.parse_args()
     print("# Options")
     for key, value in sorted(vars(args).items()):
@@ -431,11 +457,26 @@ if __name__ == "__main__":
         print("Print mean test elbo:", mean_elbo)
 
     elif args.mode == "geodesics":
+        # Import necessary function and modules for geodesics
+        from geodesics import calculate_and_plot_geodesics, new_encoder_net, new_decoder_net
 
+        # The VAE in geodesics.py uses specific networks, so we ensure consistency.
         model = VAE(
             GaussianPrior(M),
-            GaussianDecoder(new_decoder()),
-            GaussianEncoder(new_encoder()),
+            GaussianDecoder(new_decoder_net(M)),
+            GaussianEncoder(new_encoder_net(M)),
         ).to(device)
         model.load_state_dict(torch.load(args.experiment_folder + "/model.pt"))
         model.eval()
+        
+        calculate_and_plot_geodesics(
+            model=model,
+            device=device,
+            M=args.latent_dim,
+            curve_method_str=args.curve_method,
+            num_iterations=args.num_iterations,
+            lr=args.lr,
+            N=args.N,
+            num_geodesics_to_plot=args.num_curves,
+            output_filename=args.output_file
+        )
