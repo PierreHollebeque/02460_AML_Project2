@@ -4,9 +4,50 @@ This project explores Variational Autoencoders (VAEs) and the geometry of their 
 
 ## Usage
 
-The main script is `ensemble_vae.py`. It accepts several modes and arguments to control its behavior.
+The main script is `ensemble_vae.py`. It accepts a `mode` argument and several optional arguments to control its behavior.
 
-### 1. Train a VAE Model
+### Modes
+
+The first argument to `ensemble_vae.py` is the `mode`, which can be one of:
+* `train`: Trains a VAE model.
+* `sample`: Generates samples from a trained VAE and reconstructs test data.
+* `eval`: Evaluates the ELBO on the test set for a trained VAE.
+* `geodesics`: Calculates and plots geodesics in the latent space.
+
+### Common Arguments
+
+These arguments are generally applicable across different modes.
+
+* `--experiment-folder <path>`: Folder to save and load experiment results in. (Default: `experiment`)
+* `--model-name <filename>`: Name of the model file to save/load. (Default: `model.pt`)
+* `--device <device>`: Torch device to use (`cpu`, `cuda`, `mps`). (Default: `cpu`)
+* `--latent-dim <int>`: Dimension of the VAE latent space (M). (Default: `2`)
+
+### Mode-Specific Arguments
+
+#### `train` Mode
+
+* `--batch-size <int>`: Batch size for training. (Default: `32`)
+* `--epochs-per-decoder <int>`: Number of training epochs. (Default: `50`)
+* `--num-decoders <int>`: Number of decoders in the ensemble (currently trains a single VAE). (Default: `3`)
+* `--num-reruns <int>`: Number of reruns (currently not fully utilized for single VAE training). (Default: `10`)
+
+#### `sample` Mode
+
+* `--samples <filename>`: File to save generated samples. (Default: `samples.png`)
+
+#### `geodesics` Mode
+
+* `--num-curves <int>`: Number of geodesics (pairs of points) to calculate and plot. (Default: `10`)
+* `--curve-method <method>`: Curve representation method. Choices: `piecewise` or `polynomial`. (Default: `piecewise`)
+* `--N <int>`: Number of intermediate points for `piecewise` or coefficients for `polynomial` (must be 2 for `polynomial`). (Default: `30`)
+* `--num-iterations <int>`: Number of optimization iterations for each geodesic. (Default: `300`)
+* `--lr <float>`: Learning rate for the geodesic optimizer. (Default: `0.05`)
+* `--output-file <filename>`: Filename to save the geodesics plot. (Default: `experiment/geodesics.png`)
+
+### Examples
+
+#### 1. Train a VAE Model
 
 Before calculating geodesics or generating samples, you must train a model.
 
@@ -55,4 +96,3 @@ The plot will be displayed and saved as `geodesics.png`.
     ```bash
     python ensemble_vae.py geodesics --experiment-folder experiment --num-curves 25 --num-iterations 500 --output-file detailed_geodesics.png
     ```
-

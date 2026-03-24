@@ -227,6 +227,15 @@ if __name__ == "__main__":
         default="experiment",
         help="folder to save and load experiment results in (default: %(default)s)",
     )
+
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="model.pt",
+        help="name of the model file (default: %(default)s)",
+    )
+
+
     parser.add_argument(
         "--samples",
         type=str,
@@ -415,7 +424,7 @@ if __name__ == "__main__":
 
         torch.save(
             model.state_dict(),
-            f"{experiments_folder}/model.pt",
+            f"{experiments_folder}/{args.model_name}",
         )
 
     elif args.mode == "sample":
@@ -424,7 +433,7 @@ if __name__ == "__main__":
             GaussianDecoder(new_decoder()),
             GaussianEncoder(new_encoder()),
         ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/model.pt"))
+        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
         model.eval()
 
         with torch.no_grad():
@@ -444,7 +453,7 @@ if __name__ == "__main__":
             GaussianDecoder(new_decoder()),
             GaussianEncoder(new_encoder()),
         ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/model.pt"))
+        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
         model.eval()
 
         elbos = []
@@ -466,7 +475,7 @@ if __name__ == "__main__":
             GaussianDecoder(new_decoder_net(M)),
             GaussianEncoder(new_encoder_net(M)),
         ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/model.pt"))
+        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
         model.eval()
         
         calculate_and_plot_geodesics(
@@ -478,5 +487,5 @@ if __name__ == "__main__":
             lr=args.lr,
             N=args.N,
             num_geodesics_to_plot=args.num_curves,
-            output_filename=args.output_file
+            output_filename=args.experiment_folder + "/" +args.output_file
         )
