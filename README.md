@@ -85,6 +85,7 @@ The plot will be displayed and saved as `geodesics.png`.
 * `--num-iterations <int>`: Number of iterations for the optimization of each geodesic. (Default: 300)
 * `--output-file <filename>`: Filename to save the plot. (Default: `geodesics.png`)
 
+* `--seed-geo <int>`: Random seed for geodesics reproducibility. (Default: None)
 #### Advanced Examples
 
 1.  **Using the polynomial method:**
@@ -95,4 +96,9 @@ The plot will be displayed and saved as `geodesics.png`.
 2.  **Plotting 25 curves with more iterations and saving to a custom file:**
     ```bash
     python ensemble_vae.py geodesics --experiment-folder experiment --num-curves 25 --num-iterations 500 --output-file detailed_geodesics.png
+    ```
+
+3.  **Using a specific seed for reproducibility:**
+    ```bash
+    python ensemble_vae.py geodesics --experiment-folder experiment --num-curves 25 --seed-geo 42
     ```

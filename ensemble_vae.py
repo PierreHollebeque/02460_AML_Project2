@@ -302,6 +302,13 @@ if __name__ == "__main__":
         help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
     )
     parser.add_argument(
+        "--seed-geo",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Seed for geodesics calculation (default: %(default)s)",
+    )
+    parser.add_argument(
         '--curve-method', 
         type=str, 
         default='piecewise', 
@@ -487,5 +494,6 @@ if __name__ == "__main__":
             lr=args.lr,
             N=args.N,
             num_geodesics_to_plot=args.num_curves,
-            output_filename=args.experiment_folder + "/" +args.output_file
+            output_filename=args.experiment_folder + "/" +args.output_file,
+            seed=args.seed_geo
         )

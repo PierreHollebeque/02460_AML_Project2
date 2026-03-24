@@ -154,7 +154,7 @@ class Polynomial_3(CurveMethod):
         return curve_points
 
 
-def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None):
+def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None):
     """
     Calculates and plots geodesics on the latent space of a VAE.
 
@@ -167,8 +167,14 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
         lr (float): Learning rate for the optimizer.
         N (int): Number of intermediate points or coefficients for the curve method.
         num_geodesics_to_plot (int): Number of geodesics to calculate and plot.
-        output_filename (str, optional): If provided, saves the plot to this file. Defaults to None.
+        output_filename (str, optional): If provided, saves the plot to this file.
+        seed (int, optional): Random seed for reproducibility.
     """
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        print(f"Using random seed: {seed}")
+
     model.eval() # Set model to evaluation mode
 
     decoder = model.decoder # This is the GaussianDecoder instance
@@ -295,5 +301,6 @@ if __name__ == "__main__":
         lr=args.lr,
         N=args.N,
         num_geodesics_to_plot=args.num_geodesics_to_plot,
-        output_filename=args.output_filename
+        output_filename=args.output_filename,
+        seed=args.seed
     )
