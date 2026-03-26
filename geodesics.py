@@ -102,9 +102,14 @@ class CurveMethod:
 class Piecewise(CurveMethod):
     def __init__(self, x1, x2, N=10, device='cpu', dim=2):
         super().__init__(x1, x2, N, device, dim)
-        # Initialize N intermediate points with random coordinates as optimizable parameters.
+        
         if self.N > 0:
-            initial_points = torch.randn(self.N, self.dim, device=self.device, dtype=torch.float32)
+            
+            t = torch.linspace(0, 1, self.N + 2, device=self.device, dtype=torch.float32)[1:-1]
+            t = t.unsqueeze(1) # Transforme en (N, 1) pour le broadcasting
+            
+            # z(t) = x1 + t * (x2 - x1)
+            initial_points = self.x1 + t * (self.x2 - self.x1)
         else:
             initial_points = torch.empty(0, self.dim, device=self.device, dtype=torch.float32)
 
