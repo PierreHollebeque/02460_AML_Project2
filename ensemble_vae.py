@@ -93,7 +93,7 @@ class GaussianDecoder(nn.Module):
         # If decoder_net is a ModuleList, we have an ensemble.
         if isinstance(self.decoder_net, nn.ModuleList) and self.num_decoders > 0:
             if decoder_id is not None:
-                mean = self.decoder_net[decoder_id](z)
+                means = self.decoder_net[decoder_id](z)
                 return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
             else:
                 # Apply each decoder to z and average the results for the ensemble output.

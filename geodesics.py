@@ -49,24 +49,35 @@ class CurveMethod:
         """Returns all points defining the curve. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement get_full_curve_points method.")
 
-    def calculate_energy(self, decoder=None):
+    def calculate_energy(self, decoders, montecarlo_sample=10000):
         """Approximates the curve energy as sum of squared distances between reconstructed images."""
         curve_points = self.get_full_curve_points()
         
-        if curve_points.shape[0] < 2:
+        N = curve_points.shape[0]
+        
+        if N < 2:
             return torch.tensor(0.0, device=self.device, dtype=torch.float32)
+        
+        reconstructions = torch.stack([decoders(curve_points,i) for i in range(decoders.num_decoders)])
+        
+        total_energy = 0
 
-        # Get reconstructed images from the decoder for all curve points
-        # decoder(z) returns a distribution, so we take its mean
-        reconstructed_images = decoder(curve_points).mean
+        for i_idx in range(N - 1):
+            
+            l_idx = np.random.randint(0, len(decoders), size=montecarlo_sample)
+            k_idx = np.random.randint(0, len(decoders), size=montecarlo_sample)
 
-        # Calculate squared Euclidean distance between consecutive reconstructed images
-        # Assuming images are (batch_size, C, H, W)
-        segment_image_diffs = reconstructed_images[1:] - reconstructed_images[:-1]
-        squared_image_distances = torch.sum(segment_image_diffs**2, dim=list(range(1, segment_image_diffs.ndim)))
-        energy = torch.sum(squared_image_distances)
+            # f_l(c(t_i))
+            img_i = reconstructions[l_idx, i_idx]
+            # f_k(c(t_{i+1}))
+            img_next = reconstructions[k_idx, i_idx + 1]
 
-        return energy
+            diffs = (img_i - img_next).view(montecarlo_sample, -1)
+            squared_distances = torch.sum(diffs**2, dim=1)
+
+            total_energy += torch.mean(squared_distances)
+
+        return total_energy
 
 class Piecewise(CurveMethod):
     def __init__(self, x1, x2, N=10, device='cpu', dim=2):
