@@ -178,7 +178,8 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
     model.eval() # Set model to evaluation mode
 
     decoder = model.decoder # This is the GaussianDecoder instance
-    cbar_label = 'L2 Norm of Reconstructed Image' # Update label for background plot
+    # Background visualization: L2 Norm of the gradient of the sum of reconstructed pixels w.r.t. latent Z
+    cbar_label = 'L2 Norm of Gradient of Sum of Reconstructed Pixels w.r.t. Latent Z'
 
     # Determine curve_method class and N value
     if curve_method_str == 'piecewise':
@@ -196,7 +197,22 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
 
     # Generate random latent points for all start and end points of the geodesics
     # We need 2 * num_geodesics_to_plot individual points
-    all_latent_points = torch.randn(2 * num_geodesics_to_plot, M, device=device)
+    # Instead of random points, generate points on two lines: z_0 = 1 and z_0 = -1,
+    # ensuring that for each geodesic, the points share the same coordinates in dimensions z_1 to z_{M-1}.
+    
+    # Generate common coordinates for dimensions z_1 to z_{M-1} for all geodesics
+    if M > 1:
+        # Sample remaining dimensions randomly, e.g., from a uniform distribution in [-2, 2]
+        common_other_dims = (torch.rand(num_geodesics_to_plot, M - 1, device=device) * 4) - 2
+    else:
+        common_other_dims = torch.empty(num_geodesics_to_plot, 0, device=device) # Handle M=1 case
+
+    # Create the first set of points (z_0 = 1) using common_other_dims
+    line1_points = torch.cat((torch.ones(num_geodesics_to_plot, 1, device=device), common_other_dims), dim=1)
+
+    # Create the second set of points (z_0 = -1) using common_other_dims
+    line2_points = torch.cat((torch.full((num_geodesics_to_plot, 1), -1.0, device=device), common_other_dims), dim=1)
+    all_latent_points = torch.cat((line1_points, line2_points), dim=0)
 
     # 4. Plot Results
     plt.figure(figsize=(10, 8))
@@ -207,14 +223,26 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
     # For now, keep it fixed for simplicity, assuming latent points are often around 0.
     xx, yy = np.meshgrid(grid_range, grid_range) 
     grid_points = torch.tensor(np.stack([xx.ravel(), yy.ravel()], axis=-1), dtype=torch.float32, device=device)
+    grid_points.requires_grad_(True) # Enable gradient computation for grid_points
     
-    with torch.no_grad(): # No gradients needed for plotting background
-        # Get reconstructed images and calculate their L2 norm for the background plot
-        reconstructed_images_dist = decoder(grid_points)
-        reconstructed_images_mean = reconstructed_images_dist.mean
-        # Calculate L2 norm over the image dimensions (C, H, W)
-        zz = torch.sqrt(torch.sum(reconstructed_images_mean**2, dim=list(range(1, reconstructed_images_mean.ndim)))).cpu().numpy().reshape(xx.shape)
-
+    reconstructed_images_mean = decoder(grid_points).mean # (B, C, H, W)
+    
+    # Calculate the sum of all pixel values for each reconstructed image
+    scalar_image_values = reconstructed_images_mean.sum(dim=list(range(1, reconstructed_images_mean.ndim)))
+    
+    # Compute the gradients of these scalar values with respect to grid_points.
+    # This gives a tensor of shape (B, M), where each row is the gradient vector
+    # for the corresponding latent point.
+    grads = torch.autograd.grad(
+        outputs=scalar_image_values,
+        inputs=grid_points,
+        grad_outputs=torch.ones_like(scalar_image_values),
+        create_graph=False, # No need for higher-order gradients
+        retain_graph=False # Can be False as this is the final backward pass for the background
+    )[0]
+    
+    # Calculate the L2 norm of each gradient vector
+    zz = torch.norm(grads, p=2, dim=1).cpu().numpy().reshape(xx.shape)
 
     plt.contourf(xx, yy, zz, levels=50, cmap='viridis', alpha=0.5) # Increased levels for smoother background
     plt.colorbar().set_label(cbar_label)
@@ -226,8 +254,8 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
     first_geodesic_plotted = False # Flag to ensure 'Optimized Geodesics' label appears only once in legend
     # Loop num_geodesics_to_plot times, taking two points from all_latent_points for each geodesic
     for i in tqdm(range(num_geodesics_to_plot), desc="Calculating Geodesics"):
-        x1 = all_latent_points[2 * i]
-        x2 = all_latent_points[2 * i + 1]
+        x1 = line1_points[i]
+        x2 = line2_points[i]
 
         # 2. Initialize Curve for this pair
         curve_method = curve_class(x1, x2, N=N_val, device=device, dim=M)
