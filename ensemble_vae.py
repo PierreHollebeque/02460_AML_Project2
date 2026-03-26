@@ -330,7 +330,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-file",
         type=str,
-        default="experiment/geodesics.png",
+        default="geodesics.png",
         help="file to save the geodesics plot in (default: %(default)s)",
     )
     args = parser.parse_args()
