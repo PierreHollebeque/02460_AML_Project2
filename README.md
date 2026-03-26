@@ -43,7 +43,7 @@ These arguments are generally applicable across different modes.
 * `--N <int>`: Number of intermediate points for `piecewise` or coefficients for `polynomial` (must be 2 for `polynomial`). (Default: `30`)
 * `--num-iterations <int>`: Number of optimization iterations for each geodesic. (Default: `300`)
 * `--lr <float>`: Learning rate for the geodesic optimizer. (Default: `0.05`)
-* `--output-file <filename>`: Filename to save the geodesics plot. (Default: `experiment/geodesics.png`)
+* `--output-file <filename>`: Filename to save the geodesics plot. (Default: `geodesics.png`)
 
 ### Examples
 
