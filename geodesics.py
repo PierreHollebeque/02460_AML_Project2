@@ -6,7 +6,7 @@ import argparse # Added for command-line arguments
 import torch.nn as nn
 from tqdm import tqdm # Import tqdm for progress bar
 # Import VAE components from ensemble_vae.py
-from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder, new_decoder, new_encoder
+from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder, new_decoder, new_encoder, vae_load
 
 
 class EnergyMinimizer:
@@ -253,18 +253,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 1.2. Load VAE model
-    latent_dim = args.latent_dim
-    # Instantiate VAE components using the copied new_encoder_net and new_decoder_net
-    prior = GaussianPrior(latent_dim)
-    decoder_module = GaussianDecoder(new_decoder(latent_dim))
-    encoder_module = GaussianEncoder(new_encoder(latent_dim))
-    model = VAE(prior, decoder_module, encoder_module).to(device)
-    model.load_state_dict(torch.load(args.vae_model_path, map_location=device))
+    model, parameters = vae_load(args.vae_model_path, device)
+    latent_dim = parameters['latent_dim']
     
     calculate_and_plot_geodesics(
         model=model,
         device=device,
-        latent_dim=args.latent_dim,
+        latent_dim=latent_dim,
         curve_method_str=args.curve_method,
         num_iterations=args.num_iterations,
         lr=args.lr,

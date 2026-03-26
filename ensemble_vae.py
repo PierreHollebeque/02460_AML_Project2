@@ -93,7 +93,7 @@ class GaussianDecoder(nn.Module):
         # If decoder_net is a ModuleList, we have an ensemble.
         if isinstance(self.decoder_net, nn.ModuleList) and self.num_decoders > 0:
             if decoder_id is not None:
-                mean = self.decoder_net[decoder_id](z)
+                means = self.decoder_net[decoder_id](z)
                 return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
             else:
                 # Apply each decoder to z and average the results for the ensemble output.
@@ -224,7 +224,7 @@ def vae_load(model_path, device):
     num_decoders = save_dict["num_decoders"]
     model = VAE(GaussianPrior(latent_dim), GaussianDecoder(new_decoder(latent_dim, num_decoders), num_decoders), GaussianEncoder(new_encoder(latent_dim))).to(device)
     model.load_state_dict(save_dict["model_state_dict"])
-    return model
+    return model, {"latent_dim": latent_dim, "num_decoders": num_decoders}
 
 
 def train(model, optimizer, data_loader, epochs, device):
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-decoders",
         type=int,
-        default=3,
+        default=1,
         metavar="N",
         help="number of decoders in the ensemble (default: %(default)s)",
     )
@@ -483,7 +483,7 @@ if __name__ == "__main__":
         )
 
     elif args.mode == "sample":
-        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
+        model, _ = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
 
         with torch.no_grad():
@@ -498,7 +498,7 @@ if __name__ == "__main__":
 
     elif args.mode == "eval":
         # Load trained model
-        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
+        model, _ = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
 
         elbos = []
@@ -515,13 +515,13 @@ if __name__ == "__main__":
         from geodesics import calculate_and_plot_geodesics
 
         # The VAE in geodesics.py uses specific networks, so we ensure consistency.
-        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
+        model, parameters = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
         
         calculate_and_plot_geodesics(
             model=model,
             device=device,
-            latent_dim=args.latent_dim,
+            latent_dim=parameters['latent_dim'],
             curve_method_str=args.curve_method,
             num_iterations=args.num_iterations,
             lr=args.lr,
