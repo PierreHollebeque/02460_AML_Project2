@@ -169,7 +169,6 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
         num_geodesics_to_plot (int): Number of geodesics to calculate and plot.
         output_filename (str, optional): If provided, saves the plot to this file.
         seed (int, optional): Random seed for reproducibility.
-        hfdsjhfkdsjf
     """
     if seed is not None:
         torch.manual_seed(seed)
