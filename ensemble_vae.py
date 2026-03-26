@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 import torch.utils.data
+import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 import os
@@ -278,44 +279,88 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
-def plot_cov(all_models,N=10,num_curve=100,num_iter=100,lr=1e-3):
+def plot_cov(all_models, D_values, device, N=10, num_curve=100, num_iter=100, lr=1e-3, methods=("euclidian", "piecewise")):
     """
     Plots the average CoV against the number of decoders.
 
     N: Number of points
     all_models: list containing lists of M models (ensemble).
-    *arg: training parameters
+    methods: desired training methods to plot
+    *everything else: training parameters
     """
 
     import seaborn as sns
+    from geodesics import compute_avg
     sns.set_style("whitegrid")
     sns.set_context("paper")
-
-    D = [1,2,3]
     
-    latent_dim = all_models[0].decoder[0].in_features #get dimension of z
-    methods = ["euclidian","piecewise"] #the desired methods
+    latent_dim = all_models[0][0].prior.latent_dim #get dimension of z
 
     z = torch.randn(N, latent_dim, device=device) #random latent points
 
-    cov_avg = np.zeros((len(D), len(methods)))
+    cov_avg = np.zeros((len(D_values), len(methods)))
 
     plt.figure(figsize=(5.5, 3.5))
     for i,method in enumerate(methods):
-        for d in D-1:
+        for d in D_values:
             cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method)
-        plt.plot(D, cov_avg[:, i], marker="o", label=method)
+        plt.plot(D_values, cov_avg[:, i], marker="o", label=method)
     
     plt.xlabel("Number of decoders")
     plt.ylabel("Average CoV")
     plt.title("CoV of latent distances")
     plt.legend()
-    plt.xticks(D)
+    plt.xticks(D_values)
     plt.tight_layout()
 
     plt.show()
     
     return
+
+def load_models_for_cov(root_folder, D_values, M, device):
+    print(f"\n[INFO] Loading models from root folder: {root_folder}")
+    print(f"[INFO] Target decoder counts D: {D_values}")
+    print(f"[INFO] Models per D (M): {M}\n")
+
+    all_models = []
+
+    for d in D_values:
+        subfolder = os.path.join(root_folder, f"{d}_decoders")
+        print(f"[INFO] Checking folder: {subfolder}")
+
+        if not os.path.isdir(subfolder):
+            raise FileNotFoundError(f"[ERROR] Missing folder: {subfolder}")
+
+        all_files = sorted(os.listdir(subfolder))
+        model_files = [f for f in all_files if f.endswith(".pt")]
+
+        print(f"[INFO] Found {len(model_files)} .pt files")
+
+        model_files = model_files[:M]
+
+        if len(model_files) < M:
+            raise ValueError(
+                f"[ERROR] Folder {subfolder} only contains {len(model_files)} model files, but M={M}"
+            )
+
+        print(f"[INFO] Using files: {model_files}")
+
+        models_d = []
+        for i, fname in enumerate(model_files):
+            model_path = os.path.join(subfolder, fname)
+            print(f"[LOAD] ({i+1}/{M}) Loading: {model_path}")
+
+            model, _ = vae_load(model_path, device)
+            model.eval()
+
+            models_d.append(model)
+
+        print(f"[DONE] Loaded {len(models_d)} models for D={d}\n")
+
+        all_models.append(models_d)
+
+    print("[SUCCESS] Finished loading all models.\n")
+    return all_models
 
 
 if __name__ == "__main__":
@@ -330,7 +375,7 @@ if __name__ == "__main__":
         "mode",
         type=str,
         default="train",
-        choices=["train", "sample", "eval", "geodesics"],
+        choices=["train", "sample", "eval", "geodesics", "plot_cov"],
         help="what to do when running the script (default: %(default)s)",
     )
     parser.add_argument(
@@ -444,6 +489,28 @@ if __name__ == "__main__":
         type=str,
         default="geodesics.png",
         help="file to save the geodesics plot in (default: %(default)s)",
+    )
+    parser.add_argument(
+    "--M",
+    type=int,
+    default=10,
+    help="Number of rerun models to load per decoder count for plot_cov."
+    )
+
+    parser.add_argument(
+        "--D",
+        type=int,
+        nargs="+",
+        default=[1, 2, 3],
+        help="Decoder counts to include in plot_cov, e.g. --D 1 2 3"
+    )
+
+    parser.add_argument(
+        "--cov-methods",
+        type=str,
+        nargs="+",
+        default=["euclidian", "piecewise"],
+        help='Methods for CoV plot, e.g. --cov-methods euclidian piecewise polynomial'
     )
     args = parser.parse_args()
     print("# Options")
@@ -568,4 +635,22 @@ if __name__ == "__main__":
             num_geodesics_to_plot=args.num_curves,
             output_filename=args.experiment_folder + "/" +args.output_file,
             seed=args.seed_geo
+        )
+    elif args.mode == "plot_cov":
+        all_models = load_models_for_cov(
+            root_folder=args.experiment_folder,
+            D_values=args.D,
+            M=args.M,
+            device=device
+        )
+
+        plot_cov(
+            all_models=all_models,
+            D_values=args.D,
+            device=device,
+            N=args.N,
+            num_curve=args.num_curves,
+            num_iter=args.num_iterations,
+            lr=args.lr,
+            methods=args.cov_methods
         )
