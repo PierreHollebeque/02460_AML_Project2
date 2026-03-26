@@ -52,13 +52,24 @@ class CurveMethod:
     def calculate_energy(self, decoders, montecarlo_sample=500):
         """Approximates the curve energy as sum of squared distances between reconstructed images."""
         curve_points = self.get_full_curve_points()
-        
         N = curve_points.shape[0]
         
         if N < 2:
             return torch.tensor(0.0, device=self.device, dtype=torch.float32)
         reconstructions = torch.stack([decoders(curve_points,i).mean for i in range(decoders.num_decoders)])
+
+        if decoders.num_decoders == 1: # One decoder : fallback to previous implementation
+            decoder = decoders
+            curve_points = self.get_full_curve_points()
+            reconstructed_images = decoder(curve_points).mean
+            # Calculate squared Euclidean distance between consecutive reconstructed images
+            # Assuming images are (batch_size, C, H, W)
+            segment_image_diffs = reconstructed_images[1:] - reconstructed_images[:-1]
+            squared_image_distances = torch.sum(segment_image_diffs**2, dim=list(range(1, segment_image_diffs.ndim)))
+            energy = torch.sum(squared_image_distances)
+            return energy
         
+
         total_energy = 0
 
         for i_idx in range(N - 1):

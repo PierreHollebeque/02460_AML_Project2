@@ -91,7 +91,7 @@ class GaussianDecoder(nn.Module):
            A tensor of dimension `(batch_size, latent_dim)`, where latent_dim is the dimension of the latent space.
         """
         # If decoder_net is a ModuleList, we have an ensemble.
-        if isinstance(self.decoder_net, nn.ModuleList) and self.num_decoders > 0:
+        if isinstance(self.decoder_net, nn.ModuleList) and self.num_decoders > 1:
             if decoder_id is not None:
                 means = self.decoder_net[decoder_id](z)
                 return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
