@@ -512,6 +512,11 @@ if __name__ == "__main__":
         default=["euclidian", "piecewise"],
         help='Methods for CoV plot, e.g. --cov-methods euclidian piecewise polynomial'
     )
+    parser.add_argument(
+        "--three-dim",
+        action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
+        help="Bool about whether to plot in 3d or not. (default: %(default)s)"
+    )
     args = parser.parse_args()
     print("# Options")
     for key, value in sorted(vars(args).items()):
@@ -623,7 +628,6 @@ if __name__ == "__main__":
         # The VAE in geodesics.py uses specific networks, so we ensure consistency.
         model, parameters = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
-        
         calculate_and_plot_geodesics(
             model=model,
             device=device,
@@ -634,7 +638,26 @@ if __name__ == "__main__":
             N=args.N,
             num_geodesics_to_plot=args.num_curves,
             output_filename=args.experiment_folder + "/" +args.output_file,
-            seed=args.seed_geo
+            seed=args.seed_geo,
+            three_d=args.three_dim
+        )
+    elif args.mode == "plot_cov":
+        all_models = load_models_for_cov(
+            root_folder=args.experiment_folder,
+            D_values=args.D,
+            M=args.M,
+            device=device
+        )
+
+        plot_cov(
+            all_models=all_models,
+            D_values=args.D,
+            device=device,
+            N=args.N,
+            num_curve=args.num_curves,
+            num_iter=args.num_iterations,
+            lr=args.lr,
+            methods=args.cov_methods
         )
     elif args.mode == "plot_cov":
         all_models = load_models_for_cov(
