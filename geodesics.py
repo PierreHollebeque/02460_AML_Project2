@@ -123,14 +123,14 @@ class Polynomial_3(CurveMethod):
         return curve_points
 
 
-def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None):
+def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None):
     """
     Calculates and plots geodesics on the latent space of a VAE.
 
     Args:
         model (VAE): The trained VAE model.
         device (str): The device to run computations on ('cpu' or 'cuda').
-        M (int): The dimension of the latent space.
+        latent_dim (int): The dimension of the latent space.
         curve_method_str (str): The curve representation method ('piecewise' or 'polynomial').
         num_iterations (int): Number of optimization iterations.
         lr (float): Learning rate for the optimizer.
@@ -165,7 +165,7 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
 
     # Generate random latent points for all start and end points of the geodesics
     # We need 2 * num_geodesics_to_plot individual points
-    all_latent_points = torch.randn(2 * num_geodesics_to_plot, M, device=device)
+    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
 
     # 4. Plot Results
     plt.figure(figsize=(10, 8))
@@ -199,7 +199,7 @@ def calculate_and_plot_geodesics(model, device, M, curve_method_str, num_iterati
         x2 = all_latent_points[2 * i + 1]
 
         # 2. Initialize Curve for this pair
-        curve_method = curve_class(x1, x2, N=N_val, device=device, dim=M)
+        curve_method = curve_class(x1, x2, N=N_val, device=device, dim=latent_dim)
         
         # 3. Run Optimization for this pair
         minimizer = EnergyMinimizer(
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimize a curve's energy using different metrics and curve representations.")
     parser.add_argument('--vae_model_path', type=str, default='experiment/model.pt',
                         help='Path to the trained VAE model state_dict.')
-    parser.add_argument('--latent-dim', type=int, default=2, help='Dimension of the VAE latent space (M).')
+    parser.add_argument('--latent-dim', type=int, default=2, help='Dimension of the VAE latent space (latent_dim).')
     parser.add_argument('--curve_method', type=str, default='piecewise', choices=['piecewise', 'polynomial'],
                         help='Choose the curve representation: "piecewise" (Piecewise) or "polynomial" (Polynomial_3).')
     parser.add_argument('--num_iterations', type=int, default=300,
@@ -253,18 +253,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 1.2. Load VAE model
-    M = args.latent_dim
+    latent_dim = args.latent_dim
     # Instantiate VAE components using the copied new_encoder_net and new_decoder_net
-    prior = GaussianPrior(M)
-    decoder_module = GaussianDecoder(new_decoder(M))
-    encoder_module = GaussianEncoder(new_encoder(M))
+    prior = GaussianPrior(latent_dim)
+    decoder_module = GaussianDecoder(new_decoder(latent_dim))
+    encoder_module = GaussianEncoder(new_encoder(latent_dim))
     model = VAE(prior, decoder_module, encoder_module).to(device)
     model.load_state_dict(torch.load(args.vae_model_path, map_location=device))
     
     calculate_and_plot_geodesics(
         model=model,
         device=device,
-        M=args.latent_dim,
+        latent_dim=args.latent_dim,
         curve_method_str=args.curve_method,
         num_iterations=args.num_iterations,
         lr=args.lr,
