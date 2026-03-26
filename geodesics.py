@@ -7,6 +7,7 @@ import torch.nn as nn
 from tqdm import tqdm # Import tqdm for progress bar
 # Import VAE components from ensemble_vae.py
 from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder, new_decoder, new_encoder, vae_load
+import plotly.graph_objects as go
 
 
 class EnergyMinimizer:
@@ -19,8 +20,8 @@ class EnergyMinimizer:
     
     def minimize_energy(self, num_iterations=100):
         """Minimizes the curve's energy via gradient descent."""
-        # print(f"Starting energy minimization for {type(self.curve_method).__name__} curve...")
-        for i in range(num_iterations):
+        for i in tqdm(range(num_iterations), desc=f"Minimizing Energy for {type(self.curve_method).__name__}", leave=False):
+
             self.optimizer.zero_grad()
             
             # Calculate energy using the curve's specific implementation
@@ -29,10 +30,6 @@ class EnergyMinimizer:
             energy.backward()
             self.optimizer.step()
             
-            # if (i + 1) % (num_iterations // 10 if num_iterations >= 10 else 1) == 0 or i == 0: # Print progress
-            #     print(f"Iteration {i+1}/{num_iterations}, Energy: {energy.item():.4f}")
-        
-        # print("Minimization complete.")
         return self.curve_method.get_full_curve_points()
 
 
@@ -93,12 +90,10 @@ class Piecewise(CurveMethod):
     def __init__(self, x1, x2, N=10, device='cpu', dim=2):
         super().__init__(x1, x2, N, device, dim)
         # Initialize N intermediate points with random coordinates as optimizable parameters.
-        if self.N > 0:
-            initial_points = torch.randn(self.N, self.dim, device=self.device, dtype=torch.float32)
-        else:
-            initial_points = torch.empty(0, self.dim, device=self.device, dtype=torch.float32)
-
-        self.parameters = torch.nn.Parameter(initial_points)
+        self.N = N
+        linspace_points = torch.linspace(0, 1, N + 2, device=device).unsqueeze(1)
+        interpolated = (1 - linspace_points) * self.x1 + linspace_points * self.x2
+        self.parameters = torch.nn.Parameter(interpolated[1:-1])
     
     def get_full_curve_points(self):
         """Assembles the full curve from start, intermediate, and end points."""
@@ -108,40 +103,135 @@ class Piecewise(CurveMethod):
             return torch.cat((self.x1.unsqueeze(0), self.x2.unsqueeze(0)), dim=0)
 
 
-class Polynomial_3(CurveMethod):
-    def __init__(self, x1, x2, N=2, device='cpu', dim=2): # N=2 for the two free vector coefficients
-        super().__init__(x1, x2, N, device, dim)
+class PolynomialCurve(CurveMethod):
+    def __init__(self, x1, x2, N=3, device='cpu', dim=2):
+        """
+        N: Degree of the model = Number of free parameters - 1.
+        dim: Dimensionality of the space (default 2).
+        """
+        super().__init__(x1, x2, N-1, device, dim)
+        # N-1 because of the multiplication by the bridge
         
-        if self.N != 2:
-            raise ValueError(f"Polynomial_3 (cubic polynomial) requires N=2 for coefficients, but got N={self.N}.")
+        # self.N free coefficients (w_k) for the bridge polynomial P(t)
+        # Shape: (N, dim)
+        self.parameters = torch.nn.Parameter(
+            torch.randn(self.N, self.dim, device=self.device, dtype=torch.float32)
+        )
+        self.num_eval_points = 100
 
-        # Initialize the two free polynomial coefficients (w3, w2) as optimizable parameters.
-        initial_coeffs = torch.randn(self.N, self.dim, device=self.device, dtype=torch.float32)
-        self.parameters = torch.nn.Parameter(initial_coeffs)
-
-        self.num_eval_points = 100 
-
-    
     def get_full_curve_points(self):
         """
-        Evaluates the cubic polynomial c(t) = w3*t³ + w2*t² + w1*t + w0.
-        Coefficients w3 and w2 are the optimizable parameters.
-        Coefficients w1 and w0 are derived from endpoint constraints c(0)=x1, c(1)=x2.
+        Evaluates: c(t) = (1-t)x1 + t*x2 + t(1-t) * sum_{k=0}^{N-1} (w_k * t^k)
         """
-        w3, w2 = self.parameters[0], self.parameters[1]
-
-        # Derive fixed coefficients from endpoint constraints.
-        w0 = self.x1
-        w1 = self.x2 - self.x1 - w3 - w2
-
-        t = torch.linspace(0, 1, self.num_eval_points, device=self.device, dtype=torch.float32)
-
-        # Evaluate polynomial c(t) for all t values.
-        t3 = t.pow(3).unsqueeze(-1)
-        t2 = t.pow(2).unsqueeze(-1)
-        t1 = t.unsqueeze(-1)
-        curve_points = t3 * w3 + t2 * w2 + t1 * w1 + w0
+        # 1. Setup t: (M, 1)
+        t = torch.linspace(0, 1, self.num_eval_points, device=self.device).unsqueeze(-1)
+        
+        # 2. Build power basis: [t^0, t^1, ..., t^{N-1}]
+        # powers shape: (N,) -> t_pow shape: (M, N)
+        powers = torch.arange(self.N, device=self.device, dtype=torch.float32)
+        t_pow = t ** powers 
+        
+        # 3. Compute P(t) via matrix multiplication
+        # (M, N) @ (N, dim) -> (M, dim)
+        poly_P_t = torch.matmul(t_pow, self.parameters)
+        
+        # 4. Apply bridge constraint
+        bridge = t * (1 - t)
+        
+        # 5. Final interpolation
+        # (1-t)*x1 + t*x2 + bridge*P(t)
+        curve_points = (1 - t) * self.x1 + t * self.x2 + bridge * poly_P_t
         return curve_points
+
+
+
+def calculate_and_plot_geodesics_3d(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, seed=None):
+    """
+    Plots geodesics in 3D where the Z-axis represents the L2 norm of the VAE reconstruction.
+    """
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+    model.eval()
+    decoder = model.decoder
+
+    # 1. Setup Curve Classes
+    if curve_method_str == 'piecewise':
+        curve_class = Piecewise
+    elif curve_method_str == 'polynomial':
+        curve_class = PolynomialCurve
+    else:
+        raise ValueError(f"Unknown curve method: {curve_method_str}")
+
+    # 2. Generate Background Surface (L2 Norm)
+    grid_range = np.linspace(-4, 4, 100)
+    xx, yy = np.meshgrid(grid_range, grid_range)
+    grid_points = torch.tensor(np.stack([xx.ravel(), yy.ravel()], axis=-1), 
+                               dtype=torch.float32, device=device)
+    
+    with torch.no_grad():
+        reconstructed_dist = decoder(grid_points)
+        recon_mean = reconstructed_dist.mean
+        # Calculate L2 Norm: sqrt(sum(x^2))
+        zz = torch.sqrt(torch.sum(recon_mean**2, dim=list(range(1, recon_mean.ndim))))
+        zz = zz.cpu().numpy().reshape(xx.shape)
+
+    # Create the 3D Surface
+    fig = go.Figure(data=[go.Surface(z=zz, x=xx, y=yy, colorscale='Viridis', opacity=0.8, name='L2 Norm Surface')])
+
+    # 3. Calculate and Plot Geodesics
+    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
+    
+    for i in tqdm(range(num_geodesics_to_plot), desc="Calculating 3D Geodesics"):
+        x1, x2 = all_latent_points[2 * i], all_latent_points[2 * i + 1]
+        
+        curve_method = curve_class(x1, x2, N=N, device=device, dim=latent_dim)
+        minimizer = EnergyMinimizer(decoder=decoder, curve_method_instance=curve_method, 
+                                    optimizer_class=torch.optim.Adam, lr=lr)
+        
+        # Optimize
+        optimized_points = minimizer.minimize_energy(num_iterations=num_iterations).detach()
+        
+        # Calculate Z-values for the geodesic points specifically
+        with torch.no_grad():
+            pts_recon = decoder(optimized_points).mean
+            pts_z = torch.sqrt(torch.sum(pts_recon**2, dim=list(range(1, pts_recon.ndim)))).cpu().numpy()
+        
+        opt_np = optimized_points.cpu().numpy()
+
+        # Add Geodesic Line (elevated slightly by +0.05 to prevent clipping through surface)
+        fig.add_trace(go.Scatter3d(
+            x=opt_np[:, 0], y=opt_np[:, 1], z=pts_z + 0.05,
+            mode='lines',
+            line=dict(color='white', width=4),
+            name=f'Geodesic {i+1}'
+        ))
+
+        # Add Start/End Markers
+        fig.add_trace(go.Scatter3d(
+            x=[opt_np[0, 0], opt_np[-1, 0]], 
+            y=[opt_np[0, 1], opt_np[-1, 1]], 
+            z=[pts_z[0] + 0.1, pts_z[-1] + 0.1],
+            mode='markers',
+            marker=dict(color='black', size=4),
+            showlegend=False
+        ))
+
+    # 4. Layout Improvements
+    fig.update_layout(
+        title=f"3D Geodesic Paths on L2 Norm Surface ({curve_method_str})",
+        scene=dict(
+            xaxis_title='Latent Dim 1',
+            yaxis_title='Latent Dim 2',
+            zaxis_title='L2 Norm (Energy)',
+            aspectmode='manual',
+            aspectratio=dict(x=1, y=1, z=0.5) # Flatten Z slightly for better visibility
+        ),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    
+    fig.show()
 
 
 def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None):
@@ -169,18 +259,12 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
 
     decoder = model.decoder # This is the GaussianDecoder instance
     cbar_label = 'L2 Norm of Reconstructed Image' # Update label for background plot
-
+    N_val = N
     # Determine curve_method class and N value
     if curve_method_str == 'piecewise':
         curve_class = Piecewise
-        N_val = N
     elif curve_method_str == 'polynomial':
-        curve_class = Polynomial_3
-        if N != 2:
-            print(f"Warning: Polynomial_3 requires N=2, but got N={N}. Setting N=2.")
-            N_val = 2
-        else:
-            N_val = N
+        curve_class = PolynomialCurve
     else:
         raise ValueError(f"Unknown curve method: {curve_method_str}")
 
