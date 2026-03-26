@@ -364,8 +364,6 @@ def compute_geodesic(x1,x2,model,curve_method_str="piecewise",num_curve=100,num_
     else: return np.linalg.norm(np.diff([x1,x2], axis=0), axis=1) #compute eucledian distance
 
 
-
-
 if __name__ == "__main__":
     # 1. Setup
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
