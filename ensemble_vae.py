@@ -17,18 +17,18 @@ import math
 import matplotlib.pyplot as plt
 
 class GaussianPrior(nn.Module):
-    def __init__(self, M):
+    def __init__(self, latent_dim):
         """
         Define a Gaussian prior distribution with zero mean and unit variance.
 
                 Parameters:
-        M: [int]
+        latent_dim: [int]
            Dimension of the latent space.
         """
         super(GaussianPrior, self).__init__()
-        self.M = M
-        self.mean = nn.Parameter(torch.zeros(self.M), requires_grad=False)
-        self.std = nn.Parameter(torch.ones(self.M), requires_grad=False)
+        self.latent_dim = latent_dim
+        self.mean = nn.Parameter(torch.zeros(self.latent_dim), requires_grad=False)
+        self.std = nn.Parameter(torch.ones(self.latent_dim), requires_grad=False)
 
     def forward(self):
         """
@@ -49,7 +49,7 @@ class GaussianEncoder(nn.Module):
         encoder_net: [torch.nn.Module]
            The encoder network that takes as a tensor of dim `(batch_size,
            feature_dim1, feature_dim2)` and output a tensor of dimension
-           `(batch_size, 2M)`, where M is the dimension of the latent space.
+           `(batch_size, 2latent_dim)`, where latent_dim is the dimension of the latent space.
         """
         super(GaussianEncoder, self).__init__()
         self.encoder_net = encoder_net
@@ -67,30 +67,42 @@ class GaussianEncoder(nn.Module):
 
 
 class GaussianDecoder(nn.Module):
-    def __init__(self, decoder_net):
+    def __init__(self, decoder_net, num_decoders):
         """
         Define a Bernoulli decoder distribution based on a given decoder network.
 
         Parameters:
         encoder_net: [torch.nn.Module]
-           The decoder network that takes as a tensor of dim `(batch_size, M) as
-           input, where M is the dimension of the latent space, and outputs a
+           The decoder network that takes as a tensor of dim `(batch_size, latent_dim) as
+           input, where latent_dim is the dimension of the latent space, and outputs a
            tensor of dimension (batch_size, feature_dim1, feature_dim2).
         """
         super(GaussianDecoder, self).__init__()
+        self.num_decoders = num_decoders
         self.decoder_net = decoder_net
         # self.std = nn.Parameter(torch.ones(28, 28) * 0.5, requires_grad=True) # In case you want to learn the std of the gaussian.
 
-    def forward(self, z):
+    def forward(self, z, decoder_id=None):
         """
         Given a batch of latent variables, return a Bernoulli distribution over the data space.
 
         Parameters:
         z: [torch.Tensor]
-           A tensor of dimension `(batch_size, M)`, where M is the dimension of the latent space.
+           A tensor of dimension `(batch_size, latent_dim)`, where latent_dim is the dimension of the latent space.
         """
-        means = self.decoder_net(z)
-        return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
+        # If decoder_net is a ModuleList, we have an ensemble.
+        if isinstance(self.decoder_net, nn.ModuleList) and self.num_decoders > 0:
+            if decoder_id is not None:
+                mean = self.decoder_net[decoder_id](z)
+                return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
+            else:
+                # Apply each decoder to z and average the results for the ensemble output.
+                all_means = [net(z) for net in self.decoder_net]
+                mean_of_means = torch.mean(torch.stack(all_means, dim=0), dim=0)
+                return td.Independent(td.Normal(loc=mean_of_means, scale=1e-1), 3)
+        else: # Otherwise, it's a single decoder network.
+            means = self.decoder_net(z)
+            return td.Independent(td.Normal(loc=means, scale=1e-1), 3)
 
 
 class VAE(nn.Module):
@@ -113,6 +125,16 @@ class VAE(nn.Module):
         self.prior = prior
         self.decoder = decoder
         self.encoder = encoder
+        self.num_decoders = decoder.num_decoders
+
+    def select_decoder(self):
+        if self.num_decoders > 0:
+            decoder_id = torch.randint(0, self.num_decoders, (1,)).item()
+        else :
+            decoder_id = None
+        return decoder_id
+
+
 
     def elbo(self, x):
         """
@@ -127,8 +149,10 @@ class VAE(nn.Module):
         q = self.encoder(x)
         z = q.rsample()
 
+        
+
         elbo = torch.mean(
-            self.decoder(z).log_prob(x) - q.log_prob(z) + self.prior().log_prob(z)
+            self.decoder(z, decoder_id=self.select_decoder()).log_prob(x) - q.log_prob(z) + self.prior().log_prob(z)
         )
         return elbo
 
@@ -141,7 +165,7 @@ class VAE(nn.Module):
            Number of samples to generate.
         """
         z = self.prior().sample(torch.Size([n_samples]))
-        return self.decoder(z).sample()
+        return self.decoder(z, decoder_id=self.select_decoder()).sample()
 
     def forward(self, x):
         """
@@ -152,6 +176,55 @@ class VAE(nn.Module):
            A tensor of dimension `(batch_size, feature_dim1, feature_dim2)`
         """
         return -self.elbo(x)
+
+
+# Define encoder and decoder networks outside the main block for reusability
+def new_encoder(latent_dim):
+    """
+    Creates a new encoder network.
+    """
+    encoder_net = nn.Sequential(
+        nn.Conv2d(1, 16, 3, stride=2, padding=1),
+        nn.Softmax(),
+        nn.BatchNorm2d(16),
+        nn.Conv2d(16, 32, 3, stride=2, padding=1),
+        nn.Softmax(),
+        nn.BatchNorm2d(32),
+        nn.Conv2d(32, 32, 3, stride=2, padding=1),
+        nn.Flatten(),
+        nn.Linear(512, 2 * latent_dim),
+    )
+    return encoder_net
+
+def new_decoder(latent_dim, num_decoders):
+    """
+    Creates a new decoder network or a ModuleList of decoders for an ensemble.
+    """
+    decoder_net_list = nn.ModuleList([nn.Sequential(
+        nn.Linear(latent_dim, 512),
+        nn.Unflatten(-1, (32, 4, 4)),
+        nn.Softmax(),
+        nn.BatchNorm2d(32),
+        nn.ConvTranspose2d(32, 32, 3, stride=2, padding=1, output_padding=0),
+        nn.Softmax(),
+        nn.BatchNorm2d(32),
+        nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
+        nn.Softmax(),
+        nn.BatchNorm2d(16),
+        nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
+    ) for _ in range(num_decoders)])
+    return decoder_net_list[0] if num_decoders == 1 else decoder_net_list
+
+def vae_load(model_path, device):
+    """
+    Loads a VAE model from a saved state dictionary, inferring latent_dim and num_decoders.
+    """
+    save_dict = torch.load(model_path, map_location=device)
+    latent_dim = save_dict["latent_dim"]
+    num_decoders = save_dict["num_decoders"]
+    model = VAE(GaussianPrior(latent_dim), GaussianDecoder(new_decoder(latent_dim, num_decoders), num_decoders), GaussianEncoder(new_encoder(latent_dim))).to(device)
+    model.load_state_dict(save_dict["model_state_dict"])
+    return model
 
 
 def train(model, optimizer, data_loader, epochs, device):
@@ -377,37 +450,8 @@ if __name__ == "__main__":
     )
 
     # Define prior distribution
-    M = args.latent_dim
-
-    def new_encoder():
-        encoder_net = nn.Sequential(
-            nn.Conv2d(1, 16, 3, stride=2, padding=1),
-            nn.Softmax(),
-            nn.BatchNorm2d(16),
-            nn.Conv2d(16, 32, 3, stride=2, padding=1),
-            nn.Softmax(),
-            nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, 3, stride=2, padding=1),
-            nn.Flatten(),
-            nn.Linear(512, 2 * M),
-        )
-        return encoder_net
-
-    def new_decoder():
-        decoder_net = nn.Sequential(
-            nn.Linear(M, 512),
-            nn.Unflatten(-1, (32, 4, 4)),
-            nn.Softmax(),
-            nn.BatchNorm2d(32),
-            nn.ConvTranspose2d(32, 32, 3, stride=2, padding=1, output_padding=0),
-            nn.Softmax(),
-            nn.BatchNorm2d(32),
-            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
-            nn.Softmax(),
-            nn.BatchNorm2d(16),
-            nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
-        )
-        return decoder_net
+    latent_dim = args.latent_dim
+    num_decoders = args.num_decoders
 
     # Choose mode to run
     if args.mode == "train":
@@ -415,9 +459,9 @@ if __name__ == "__main__":
         experiments_folder = args.experiment_folder
         os.makedirs(f"{experiments_folder}", exist_ok=True)
         model = VAE(
-            GaussianPrior(M),
-            GaussianDecoder(new_decoder()),
-            GaussianEncoder(new_encoder()),
+            GaussianPrior(latent_dim),
+            GaussianDecoder(new_decoder(latent_dim, num_decoders), num_decoders),
+            GaussianEncoder(new_encoder(latent_dim)),
         ).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         train(
@@ -428,19 +472,18 @@ if __name__ == "__main__":
             args.device,
         )
         os.makedirs(f"{experiments_folder}", exist_ok=True)
-
+        # Save model
+        save_dict = {"model_state_dict": model.state_dict(),
+                     "latent_dim": latent_dim,
+                     "num_decoders": num_decoders
+                    }
         torch.save(
-            model.state_dict(),
+            save_dict,
             f"{experiments_folder}/{args.model_name}",
         )
 
     elif args.mode == "sample":
-        model = VAE(
-            GaussianPrior(M),
-            GaussianDecoder(new_decoder()),
-            GaussianEncoder(new_encoder()),
-        ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
+        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
 
         with torch.no_grad():
@@ -455,12 +498,7 @@ if __name__ == "__main__":
 
     elif args.mode == "eval":
         # Load trained model
-        model = VAE(
-            GaussianPrior(M),
-            GaussianDecoder(new_decoder()),
-            GaussianEncoder(new_encoder()),
-        ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
+        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
 
         elbos = []
@@ -474,21 +512,16 @@ if __name__ == "__main__":
 
     elif args.mode == "geodesics":
         # Import necessary function and modules for geodesics
-        from geodesics import calculate_and_plot_geodesics, new_encoder_net, new_decoder_net
+        from geodesics import calculate_and_plot_geodesics
 
         # The VAE in geodesics.py uses specific networks, so we ensure consistency.
-        model = VAE(
-            GaussianPrior(M),
-            GaussianDecoder(new_decoder_net(M)),
-            GaussianEncoder(new_encoder_net(M)),
-        ).to(device)
-        model.load_state_dict(torch.load(args.experiment_folder + "/" + args.model_name))
+        model = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
         
         calculate_and_plot_geodesics(
             model=model,
             device=device,
-            M=args.latent_dim,
+            latent_dim=args.latent_dim,
             curve_method_str=args.curve_method,
             num_iterations=args.num_iterations,
             lr=args.lr,

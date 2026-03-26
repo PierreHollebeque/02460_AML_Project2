@@ -5,40 +5,9 @@ import torch.optim as optim # Import for optimizer, e.g., Adam
 import argparse # Added for command-line arguments
 import torch.nn as nn
 from tqdm import tqdm # Import tqdm for progress bar
-
 # Import VAE components from ensemble_vae.py
-from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder
+from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder, new_decoder, new_encoder
 
-# Copied and adapted from ensemble_vae.py to be callable with M
-def new_encoder_net(M):
-    encoder_net = nn.Sequential(
-        nn.Conv2d(1, 16, 3, stride=2, padding=1),
-        nn.Softmax(),
-        nn.BatchNorm2d(16),
-        nn.Conv2d(16, 32, 3, stride=2, padding=1),
-        nn.Softmax(),
-        nn.BatchNorm2d(32),
-        nn.Conv2d(32, 32, 3, stride=2, padding=1),
-        nn.Flatten(),
-        nn.Linear(512, 2 * M),
-    )
-    return encoder_net
-
-def new_decoder_net(M):
-    decoder_net = nn.Sequential(
-        nn.Linear(M, 512),
-        nn.Unflatten(-1, (32, 4, 4)),
-        nn.Softmax(),
-        nn.BatchNorm2d(32),
-        nn.ConvTranspose2d(32, 32, 3, stride=2, padding=1, output_padding=0),
-        nn.Softmax(),
-        nn.BatchNorm2d(32),
-        nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
-        nn.Softmax(),
-        nn.BatchNorm2d(16),
-        nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
-    )
-    return decoder_net
 
 class EnergyMinimizer:
     def __init__(self, decoder, curve_method_instance, optimizer_class=optim.Adam, lr=0.01):
@@ -287,8 +256,8 @@ if __name__ == "__main__":
     M = args.latent_dim
     # Instantiate VAE components using the copied new_encoder_net and new_decoder_net
     prior = GaussianPrior(M)
-    decoder_module = GaussianDecoder(new_decoder_net(M))
-    encoder_module = GaussianEncoder(new_encoder_net(M))
+    decoder_module = GaussianDecoder(new_decoder(M))
+    encoder_module = GaussianEncoder(new_encoder(M))
     model = VAE(prior, decoder_module, encoder_module).to(device)
     model.load_state_dict(torch.load(args.vae_model_path, map_location=device))
     
