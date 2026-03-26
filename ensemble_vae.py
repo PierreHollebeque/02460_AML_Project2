@@ -278,6 +278,45 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
+def plot_cov(all_models,N=10,num_curve=100,num_iter=100,lr=1e-3):
+    """
+    Plots the average CoV against the number of decoders.
+
+    N: Number of points
+    all_models: list containing lists of M models (ensemble).
+    *arg: training parameters
+    """
+
+    import seaborn as sns
+    sns.set_style("whitegrid")
+    sns.set_context("paper")
+
+    D = [1,2,3]
+    
+    latent_dim = all_models[0].decoder[0].in_features #get dimension of z
+    methods = ["euclidian","piecewise"] #the desired methods
+
+    z = torch.randn(N, latent_dim, device=device) #random latent points
+
+    cov_avg = np.zeros((len(D), len(methods)))
+
+    plt.figure(figsize=(5.5, 3.5))
+    for i,method in enumerate(methods):
+        for d in D-1:
+            cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method)
+        plt.plot(D, cov_avg[:, i], marker="o", label=method)
+    
+    plt.xlabel("Number of decoders")
+    plt.ylabel("Average CoV")
+    plt.title("CoV of latent distances")
+    plt.legend()
+    plt.xticks(D)
+    plt.tight_layout()
+
+    plt.show()
+    
+    return
+
 
 if __name__ == "__main__":
     from torchvision import datasets, transforms

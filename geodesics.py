@@ -263,26 +263,32 @@ def compute_cov_matrix(D):
 
     return cov
 
-def generate_dist_mat(x,M,N,models,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3,full_matrix=0):
+def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,num_iter=1000,lr=1e-3,full_matrix=0):
     """
     Generates distance matrix for an array of points x
+    z: (N,latent_dim) array of points
+    M: Ensemble Count
+    N: Number of points
+    models: M models with same amount of decoders
     """
 
     dist_mat = np.zeros((M,N,N))
+
+    #compute geodesic distance for each unique distance for each model
     for m in range(M):
         for i in range(N):
             for j in range(i + 1, N):
-                dist_mat[m,i,j]=compute_geodesic(x[i],x[j],models[m],curve_method_str,num_curve,num_iter,lr)
-        if full_matrix:
+                dist_mat[m,i,j]=compute_geodesic(z[i],z[j],models[m],curve_method_str,num_curve,num_iter,lr)
+        if full_matrix: #can skip since we don't care about permutations
             dist_mat[m,:,:] = dist_mat[m,:,:] + dist_mat[m,:,:].T #symmetric matrix
 
     return dist_mat
 
-def compute_avg(x,models,N=10,num_curve=100,num_iter=100,lr=1e-3,curve_method_str="piecewise"):
+def compute_avg(z,models,N=10,num_curve=100,num_iter=1000,lr=1e-3,curve_method_str="piecewise"):
     M = len(models)
 
     #Compute distance matrix
-    dist_mat= generate_dist_mat(x,M,N,models,curve_method_str,num_curve=100,num_iter=100,lr=1e-3)
+    dist_mat= generate_dist_mat(z,M,N,models,curve_method_str,num_curve=100,num_iter=100,lr=1e-3)
     
     #Compute CoV matrix
     cov = compute_cov_matrix(dist_mat)
@@ -292,46 +298,17 @@ def compute_avg(x,models,N=10,num_curve=100,num_iter=100,lr=1e-3,curve_method_st
 
     return cov_avg
 
-def plot_cov(all_models,N=10,num_curve=100,num_iter=100,lr=1e-3):
-    import seaborn as sns
-    sns.set_style("whitegrid")
-    sns.set_context("paper")
-
-    D = [1,2,3]
-    
-    latent_dim = all_models[0].decoder[0].in_features
-    methods = ["euclidian","piecewise"]
-
-    x = torch.randn(N, latent_dim, device=device)
-
-    cov_avg = np.zeros((len(D), len(methods)))
-
-    plt.figure(figsize=(5.5, 3.5))
-    for i,method in enumerate(methods):
-        for d in D-1:
-            cov_avg[d-1,i] = compute_avg(x,all_models[d-1],N,num_curve,num_iter,lr,method)
-        plt.plot(D, cov_avg[:, i], marker="o", label=method)
-    
-    plt.xlabel("Number of decoders")
-    plt.ylabel("Average CoV")
-    plt.title("CoV of latent distances across models")
-    plt.legend()
-    plt.xticks(D)
-    plt.tight_layout()
-
-    plt.show()
-    
-    return
-
-
-def compute_geodesic(x1,x2,model,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3):
+def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3):
+    """
+    Temporary computation for geodesic between two point vectors.
+    """
     if curve_method_str == 'piecewise':
         curve_class = Piecewise
         N_val = num_curve
     elif curve_method_str == 'polynomial':
         curve_class = Polynomial_3
         if num_curve != 2:
-            print(f"Warning: Polynomial_3 requires N=2, but got N={N}. Setting N=2.")
+            print(f"Warning: Polynomial_3 requires N=2, but got N={num_curve}. Setting N=2.")
             N_val = 2
         else:
             N_val = num_curve
@@ -342,16 +319,16 @@ def compute_geodesic(x1,x2,model,curve_method_str="piecewise",num_curve=100,num_
 
     if curve_method_str != 'euclidian':
         #Compute the geodesic distance using the decoder
-        curve_method = curve_class(x1, x2, N=N_val, device=device, dim=M)
+        curve_method = curve_class(z1, z2, N=N_val, device=device, dim=model.decoder[0].in_features)
         minimizer = EnergyMinimizer(
-                decoder=decoder,
+                decoder=model.decoder,
                 curve_method_instance=curve_method,
                 optimizer_class=optim.Adam,
                 lr=lr
             )
         curve_points = minimizer.minimize_energy(num_iterations=num_iter).detach().cpu().numpy()
         return np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
-    else: return np.linalg.norm(np.diff([x1,x2], axis=0), axis=1) #compute eucledian distance
+    else: return np.linalg.norm(np.diff([z1,z2], axis=0), axis=1) #compute eucledian distance
 
 if __name__ == "__main__":
     # 1. Setup
