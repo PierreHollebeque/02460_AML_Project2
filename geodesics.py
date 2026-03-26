@@ -145,96 +145,7 @@ class PolynomialCurve(CurveMethod):
 
 
 
-def calculate_and_plot_geodesics_3d(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, seed=None):
-    """
-    Plots geodesics in 3D where the Z-axis represents the L2 norm of the VAE reconstruction.
-    """
-    if seed is not None:
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-
-    model.eval()
-    decoder = model.decoder
-
-    # 1. Setup Curve Classes
-    if curve_method_str == 'piecewise':
-        curve_class = Piecewise
-    elif curve_method_str == 'polynomial':
-        curve_class = PolynomialCurve
-    else:
-        raise ValueError(f"Unknown curve method: {curve_method_str}")
-
-    # 2. Generate Background Surface (L2 Norm)
-    grid_range = np.linspace(-4, 4, 100)
-    xx, yy = np.meshgrid(grid_range, grid_range)
-    grid_points = torch.tensor(np.stack([xx.ravel(), yy.ravel()], axis=-1), 
-                               dtype=torch.float32, device=device)
-    
-    with torch.no_grad():
-        reconstructed_dist = decoder(grid_points)
-        recon_mean = reconstructed_dist.mean
-        # Calculate L2 Norm: sqrt(sum(x^2))
-        zz = torch.sqrt(torch.sum(recon_mean**2, dim=list(range(1, recon_mean.ndim))))
-        zz = zz.cpu().numpy().reshape(xx.shape)
-
-    # Create the 3D Surface
-    fig = go.Figure(data=[go.Surface(z=zz, x=xx, y=yy, colorscale='Viridis', opacity=0.8, name='L2 Norm Surface')])
-
-    # 3. Calculate and Plot Geodesics
-    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
-    
-    for i in tqdm(range(num_geodesics_to_plot), desc="Calculating 3D Geodesics"):
-        x1, x2 = all_latent_points[2 * i], all_latent_points[2 * i + 1]
-        
-        curve_method = curve_class(x1, x2, N=N, device=device, dim=latent_dim)
-        minimizer = EnergyMinimizer(decoder=decoder, curve_method_instance=curve_method, 
-                                    optimizer_class=torch.optim.Adam, lr=lr)
-        
-        # Optimize
-        optimized_points = minimizer.minimize_energy(num_iterations=num_iterations).detach()
-        
-        # Calculate Z-values for the geodesic points specifically
-        with torch.no_grad():
-            pts_recon = decoder(optimized_points).mean
-            pts_z = torch.sqrt(torch.sum(pts_recon**2, dim=list(range(1, pts_recon.ndim)))).cpu().numpy()
-        
-        opt_np = optimized_points.cpu().numpy()
-
-        # Add Geodesic Line (elevated slightly by +0.05 to prevent clipping through surface)
-        fig.add_trace(go.Scatter3d(
-            x=opt_np[:, 0], y=opt_np[:, 1], z=pts_z + 0.05,
-            mode='lines',
-            line=dict(color='white', width=4),
-            name=f'Geodesic {i+1}'
-        ))
-
-        # Add Start/End Markers
-        fig.add_trace(go.Scatter3d(
-            x=[opt_np[0, 0], opt_np[-1, 0]], 
-            y=[opt_np[0, 1], opt_np[-1, 1]], 
-            z=[pts_z[0] + 0.1, pts_z[-1] + 0.1],
-            mode='markers',
-            marker=dict(color='black', size=4),
-            showlegend=False
-        ))
-
-    # 4. Layout Improvements
-    fig.update_layout(
-        title=f"3D Geodesic Paths on L2 Norm Surface ({curve_method_str})",
-        scene=dict(
-            xaxis_title='Latent Dim 1',
-            yaxis_title='Latent Dim 2',
-            zaxis_title='L2 Norm (Energy)',
-            aspectmode='manual',
-            aspectratio=dict(x=1, y=1, z=0.5) # Flatten Z slightly for better visibility
-        ),
-        margin=dict(l=0, r=0, b=0, t=40)
-    )
-    
-    fig.show()
-
-
-def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None):
+def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None, three_d=False):
     """
     Calculates and plots geodesics on the latent space of a VAE.
 
@@ -247,8 +158,9 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         lr (float): Learning rate for the optimizer.
         N (int): Number of intermediate points or coefficients for the curve method.
         num_geodesics_to_plot (int): Number of geodesics to calculate and plot.
-        output_filename (str, optional): If provided, saves the plot to this file.
+        output_filename (str, optional): If provided, saves the plot to this file (2D only).
         seed (int, optional): Random seed for reproducibility.
+        three_d (bool): If True, plots in 3D with L2 norm as Z-axis. If False, plots in 2D.
     """
     if seed is not None:
         torch.manual_seed(seed)
@@ -256,11 +168,38 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         print(f"Using random seed: {seed}")
 
     model.eval() # Set model to evaluation mode
-
     decoder = model.decoder # This is the GaussianDecoder instance
-    cbar_label = 'L2 Norm of Reconstructed Image' # Update label for background plot
-    N_val = N
-    # Determine curve_method class and N value
+
+    # 1. Generate Background (different for 2D and 3D)
+    grid_range = np.linspace(-4, 4, 100)
+    xx, yy = np.meshgrid(grid_range, grid_range)
+    grid_points = torch.tensor(np.stack([xx.ravel(), yy.ravel()], axis=-1), 
+                               dtype=torch.float32, device=device)
+    
+    with torch.no_grad():
+        reconstructed_dist = decoder(grid_points)
+        recon_mean = reconstructed_dist.mean
+        # Calculate L2 Norm: sqrt(sum(x^2))
+        zz = torch.sqrt(torch.sum(recon_mean**2, dim=list(range(1, recon_mean.ndim))))
+        zz = zz.cpu().numpy().reshape(xx.shape)
+
+    # Initialize figure
+    if three_d:
+        fig = go.Figure(data=[go.Surface(z=zz, x=xx, y=yy, colorscale='Viridis', opacity=0.8, name='L2 Norm Surface')])
+    else:
+        plt.figure(figsize=(10, 8))
+        plt.contourf(xx, yy, zz, levels=50, cmap='viridis', alpha=0.5)
+        cbar = plt.colorbar()
+        cbar.set_label('L2 Norm of Reconstructed Image')
+
+    # 2. Generate random latent points for all start and end points of the geodesics
+    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
+
+    if not three_d:
+        # Plot all sampled latent points (2D only)
+        plt.plot(all_latent_points[:, 0].cpu(), all_latent_points[:, 1].cpu(), 'ko', markersize=8, label='Sampled Latent Points')
+
+    # 3. Determine curve class based on method
     if curve_method_str == 'piecewise':
         curve_class = Piecewise
     elif curve_method_str == 'polynomial':
@@ -268,69 +207,80 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
     else:
         raise ValueError(f"Unknown curve method: {curve_method_str}")
 
-    # Generate random latent points for all start and end points of the geodesics
-    # We need 2 * num_geodesics_to_plot individual points
-    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
-
-    # 4. Plot Results
-    plt.figure(figsize=(10, 8))
-    
-    # Background visualization of the metric's "cost"
-    grid_range = np.linspace(-4, 4, 100)
-    # Adjust grid range based on sampled points if they fall outside -4,4
-    # For now, keep it fixed for simplicity, assuming latent points are often around 0.
-    xx, yy = np.meshgrid(grid_range, grid_range) 
-    grid_points = torch.tensor(np.stack([xx.ravel(), yy.ravel()], axis=-1), dtype=torch.float32, device=device)
-    
-    with torch.no_grad(): # No gradients needed for plotting background
-        # Get reconstructed images and calculate their L2 norm for the background plot
-        reconstructed_images_dist = decoder(grid_points)
-        reconstructed_images_mean = reconstructed_images_dist.mean
-        # Calculate L2 norm over the image dimensions (C, H, W)
-        zz = torch.sqrt(torch.sum(reconstructed_images_mean**2, dim=list(range(1, reconstructed_images_mean.ndim)))).cpu().numpy().reshape(xx.shape)
-
-
-    plt.contourf(xx, yy, zz, levels=50, cmap='viridis', alpha=0.5) # Increased levels for smoother background
-    plt.colorbar().set_label(cbar_label)
-
-    # Plot all sampled latent points
-    plt.plot(all_latent_points[:, 0].cpu(), all_latent_points[:, 1].cpu(), 'ko', markersize=8, label='Sampled Latent Points')
-
-    # Iterate through the specified number of pairs and compute geodesics
+    # 4. Calculate and Plot Geodesics
     first_geodesic_plotted = False # Flag to ensure 'Optimized Geodesics' label appears only once in legend
-    # Loop num_geodesics_to_plot times, taking two points from all_latent_points for each geodesic
+    
     for i in tqdm(range(num_geodesics_to_plot), desc="Calculating Geodesics"):
         x1 = all_latent_points[2 * i]
         x2 = all_latent_points[2 * i + 1]
 
-        # 2. Initialize Curve for this pair
-        curve_method = curve_class(x1, x2, N=N_val, device=device, dim=latent_dim)
-        
-        # 3. Run Optimization for this pair
+        # 5. Compute geodesic inline
+        curve_method = curve_class(x1, x2, N=N, device=device, dim=latent_dim)
         minimizer = EnergyMinimizer(
             decoder=decoder,
             curve_method_instance=curve_method,
             optimizer_class=optim.Adam,
             lr=lr
         )
-        optimized_curve_points = minimizer.minimize_energy(num_iterations=num_iterations).detach().cpu().numpy()
+        optimized_points = minimizer.minimize_energy(num_iterations=num_iterations).detach()
+        optimized_curve_points = optimized_points.cpu().numpy()
+        
+        if three_d:
+            # For 3D: calculate Z-values (L2 norm) for the geodesic points
+            optimized_points_tensor = torch.tensor(optimized_curve_points, dtype=torch.float32, device=device)
+            with torch.no_grad():
+                pts_recon = decoder(optimized_points_tensor).mean
+                pts_z = torch.sqrt(torch.sum(pts_recon**2, dim=list(range(1, pts_recon.ndim)))).cpu().numpy()
 
-        # Plot optimized curve for this pair
-        plt.plot(optimized_curve_points[:, 0], optimized_curve_points[:, 1], 'w-', linewidth=1.5, alpha=0.7, label='Optimized Geodesics' if not first_geodesic_plotted else "")
-        first_geodesic_plotted = True # Only add label once for the legend
+            # Add Geodesic Line (elevated slightly by +0.05 to prevent clipping through surface)
+            fig.add_trace(go.Scatter3d(
+                x=optimized_curve_points[:, 0], y=optimized_curve_points[:, 1], z=pts_z + 0.05,
+                mode='lines',
+                line=dict(color='white', width=4),
+                name=f'Geodesic {i+1}'
+            ))
 
-    plt.title(f'{num_geodesics_to_plot} Geodesics between Random Pairs with {curve_class.__name__} and VAE Decoder')
-    plt.xlabel('x-axis')
-    plt.ylabel('y-axis')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
-    plt.axis('equal')
+            # Add Start/End Markers
+            fig.add_trace(go.Scatter3d(
+                x=[optimized_curve_points[0, 0], optimized_curve_points[-1, 0]], 
+                y=[optimized_curve_points[0, 1], optimized_curve_points[-1, 1]], 
+                z=[pts_z[0] + 0.1, pts_z[-1] + 0.1],
+                mode='markers',
+                marker=dict(color='black', size=4),
+                showlegend=False
+            ))
+        else:
+            # For 2D: plot the geodesic curve
+            plt.plot(optimized_curve_points[:, 0], optimized_curve_points[:, 1], 'w-', linewidth=1.5, alpha=0.7, label='Optimized Geodesics' if not first_geodesic_plotted else "")
+            first_geodesic_plotted = True
 
-    if output_filename:
-        plt.savefig(output_filename)
-        print(f"Plot saved to {output_filename}")
+    # 4. Layout and Display
+    if three_d:
+        fig.update_layout(
+            title=f"3D Geodesic Paths on L2 Norm Surface ({curve_method_str})",
+            scene=dict(
+                xaxis_title='Latent Dim 1',
+                yaxis_title='Latent Dim 2',
+                zaxis_title='L2 Norm (Energy)',
+                aspectmode='manual',
+                aspectratio=dict(x=1, y=1, z=0.5)
+            ),
+            margin=dict(l=0, r=0, b=0, t=40)
+        )
+        fig.show()
+    else:
+        plt.title(f'{num_geodesics_to_plot} Geodesics between Random Pairs with {curve_method_str} and VAE Decoder')
+        plt.xlabel('x-axis')
+        plt.ylabel('y-axis')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.axis('equal')
 
-    plt.show()
+        if output_filename:
+            plt.savefig(output_filename)
+            print(f"Plot saved to {output_filename}")
+
+        plt.show()
 
 def compute_cov_matrix(D):
     """
@@ -390,12 +340,7 @@ def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_
         curve_class = Piecewise
         N_val = num_curve
     elif curve_method_str == 'polynomial':
-        curve_class = Polynomial_3
-        if num_curve != 2:
-            print(f"Warning: Polynomial_3 requires N=2, but got N={num_curve}. Setting N=2.")
-            N_val = 2
-        else:
-            N_val = num_curve
+        curve_class = PolynomialCurve
     elif curve_method_str == 'euclidian':
         pass
     else:
@@ -436,6 +381,10 @@ if __name__ == "__main__":
                         help='Number of geodesics (pairs of points) to calculate and plot.')
     parser.add_argument('--output_filename', type=str, default='geodesics_standalone.png',
                         help='Filename to save the plot.')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility.')
+    parser.add_argument('--three_d', action='store_true',
+                        help='If set, plots geodesics in 3D with L2 norm as Z-axis.')
 
     args = parser.parse_args()
 
@@ -453,5 +402,6 @@ if __name__ == "__main__":
         N=args.N,
         num_geodesics_to_plot=args.num_geodesics_to_plot,
         output_filename=args.output_filename,
-        seed=args.seed
+        seed=args.seed,
+        three_d=args.three_d
     )

@@ -447,8 +447,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--three-dim",
-        type=bool,
-        default=False,
+        action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
         help="Bool about whether to plot in 3d or not. (default: %(default)s)"
     )
     args = parser.parse_args()
@@ -557,33 +556,21 @@ if __name__ == "__main__":
 
     elif args.mode == "geodesics":
         # Import necessary function and modules for geodesics
-        from geodesics import calculate_and_plot_geodesics, calculate_and_plot_geodesics_3d
+        from geodesics import calculate_and_plot_geodesics
 
         # The VAE in geodesics.py uses specific networks, so we ensure consistency.
         model, parameters = vae_load(args.experiment_folder + "/" + args.model_name, device)
         model.eval()
-        if args.three_dim:
-            calculate_and_plot_geodesics_3d(
-                model=model,
-                device=device,
-                latent_dim=parameters['latent_dim'],
-                curve_method_str=args.curve_method,
-                num_iterations=args.num_iterations,
-                lr=args.lr,
-                N=args.N,
-                num_geodesics_to_plot=args.num_curves,
-                seed=args.seed_geo
-            )
-        else :
-            calculate_and_plot_geodesics(
-                model=model,
-                device=device,
-                latent_dim=parameters['latent_dim'],
-                curve_method_str=args.curve_method,
-                num_iterations=args.num_iterations,
-                lr=args.lr,
-                N=args.N,
-                num_geodesics_to_plot=args.num_curves,
-                output_filename=args.experiment_folder + "/" +args.output_file,
-                seed=args.seed_geo
-            )
+        calculate_and_plot_geodesics(
+            model=model,
+            device=device,
+            latent_dim=parameters['latent_dim'],
+            curve_method_str=args.curve_method,
+            num_iterations=args.num_iterations,
+            lr=args.lr,
+            N=args.N,
+            num_geodesics_to_plot=args.num_curves,
+            output_filename=args.experiment_folder + "/" +args.output_file,
+            seed=args.seed_geo,
+            three_d=args.three_dim
+        )
