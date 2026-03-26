@@ -49,7 +49,7 @@ class CurveMethod:
         """Returns all points defining the curve. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement get_full_curve_points method.")
 
-    def calculate_energy(self, decoders, montecarlo_sample=10000):
+    def calculate_energy(self, decoders, montecarlo_sample=500):
         """Approximates the curve energy as sum of squared distances between reconstructed images."""
         curve_points = self.get_full_curve_points()
         
@@ -57,15 +57,14 @@ class CurveMethod:
         
         if N < 2:
             return torch.tensor(0.0, device=self.device, dtype=torch.float32)
-        
-        reconstructions = torch.stack([decoders(curve_points,i) for i in range(decoders.num_decoders)])
+        reconstructions = torch.stack([decoders(curve_points,i).mean for i in range(decoders.num_decoders)])
         
         total_energy = 0
 
         for i_idx in range(N - 1):
             
-            l_idx = np.random.randint(0, len(decoders), size=montecarlo_sample)
-            k_idx = np.random.randint(0, len(decoders), size=montecarlo_sample)
+            l_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
+            k_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
 
             # f_l(c(t_i))
             img_i = reconstructions[l_idx, i_idx]
