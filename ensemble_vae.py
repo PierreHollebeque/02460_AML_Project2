@@ -659,21 +659,3 @@ if __name__ == "__main__":
             lr=args.lr,
             methods=args.cov_methods
         )
-    elif args.mode == "plot_cov":
-        all_models = load_models_for_cov(
-            root_folder=args.experiment_folder,
-            D_values=args.D,
-            M=args.M,
-            device=device
-        )
-
-        plot_cov(
-            all_models=all_models,
-            D_values=args.D,
-            device=device,
-            N=args.N,
-            num_curve=args.num_curves,
-            num_iter=args.num_iterations,
-            lr=args.lr,
-            methods=args.cov_methods
-        )
