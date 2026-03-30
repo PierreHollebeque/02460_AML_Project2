@@ -297,7 +297,7 @@ def compute_cov_matrix(D):
 
     return cov
 
-def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,num_iter=1000,lr=1e-3,full_matrix=0):
+def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,num_iter=1000,lr=1e-3,full_matrix=0,device='cpu'):
     """
     Generates distance matrix for an array of points x
     z: (N,latent_dim) array of points
@@ -305,24 +305,30 @@ def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,nu
     N: Number of points
     models: M models with same amount of decoders
     """
-
     dist_mat = np.zeros((M,N,N))
 
-    #compute geodesic distance for each unique distance for each model
-    for m in range(M):
+    total_pairs = N * (N - 1) // 2
+    for m in tqdm(range(M), desc="Models"):
+        pair_bar = tqdm(total=total_pairs, desc=f"Pairs (model {m+1}/{M})", leave=False)
         for i in range(N):
             for j in range(i + 1, N):
-                dist_mat[m,i,j]=compute_geodesic(z[i],z[j],models[m],curve_method_str,num_curve,num_iter,lr)
-        if full_matrix: #can skip since we don't care about permutations
-            dist_mat[m,:,:] = dist_mat[m,:,:] + dist_mat[m,:,:].T #symmetric matrix
+                dist_mat[m,i,j]=compute_geodesic(z[i],z[j],models[m],curve_method_str,num_curve,num_iter,lr,device=device)
+                pair_bar.update(1)
+        pair_bar.close()
+        if full_matrix:
+            dist_mat[m,:,:] = dist_mat[m,:,:] + dist_mat[m,:,:].T
 
     return dist_mat
 
-def compute_avg(z,models,N=10,num_curve=100,num_iter=1000,lr=1e-3,curve_method_str="piecewise"):
+def compute_avg(z,models,N=10,num_curve=100,num_iter=1000,lr=1e-3,curve_method_str="piecewise",device='cpu'):
     M = len(models)
 
     #Compute distance matrix
-    dist_mat= generate_dist_mat(z,M,N,models,curve_method_str,num_curve=100,num_iter=100,lr=1e-3)
+    dist_mat = generate_dist_mat(
+    z, M, N, models, curve_method_str,
+    num_curve=num_curve, num_iter=num_iter, lr=lr,
+    device=device
+    )
     
     #Compute CoV matrix
     cov = compute_cov_matrix(dist_mat)
@@ -332,7 +338,7 @@ def compute_avg(z,models,N=10,num_curve=100,num_iter=1000,lr=1e-3,curve_method_s
 
     return cov_avg
 
-def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3):
+def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3,device='cpu'):
     """
     Temporary computation for geodesic between two point vectors.
     """
@@ -348,7 +354,7 @@ def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_
 
     if curve_method_str != 'euclidian':
         #Compute the geodesic distance using the decoder
-        curve_method = curve_class(z1, z2, N=N_val, device=device, dim=model.decoder[0].in_features)
+        curve_method = curve_class(z1, z2, N=N_val, device=device, dim=model.prior.latent_dim)
         minimizer = EnergyMinimizer(
                 decoder=model.decoder,
                 curve_method_instance=curve_method,
@@ -357,7 +363,7 @@ def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_
             )
         curve_points = minimizer.minimize_energy(num_iterations=num_iter).detach().cpu().numpy()
         return np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
-    else: return np.linalg.norm(np.diff([z1,z2], axis=0), axis=1) #compute eucledian distance
+    else: return np.linalg.norm(z2 - z1) #compute eucledian distance
 
 if __name__ == "__main__":
     # 1. Setup

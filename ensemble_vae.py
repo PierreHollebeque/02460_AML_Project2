@@ -303,7 +303,7 @@ def plot_cov(all_models, D_values, device, N=10, num_curve=100, num_iter=100, lr
     plt.figure(figsize=(5.5, 3.5))
     for i,method in enumerate(methods):
         for d in D_values:
-            cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method)
+            cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method,device=device)
         plt.plot(D_values, cov_avg[:, i], marker="o", label=method)
     
     plt.xlabel("Number of decoders")
