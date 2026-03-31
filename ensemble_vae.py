@@ -252,10 +252,19 @@ def train(model, optimizer, data_loader, epochs, device):
         eps = std * torch.randn_like(x)
         return torch.clamp(x + eps, min=0.0, max=1.0)
 
+    data_iter = iter(data_loader)
+
     with tqdm(range(num_steps)) as pbar:
         for step in pbar:
             try:
-                x = next(iter(data_loader))[0]
+                #x = next(iter(data_loader))[0] #pretty sure this reinitializes so it will always run 1st batch.
+
+                try:
+                    x = next(data_iter)[0] #I think this should correcly run through batches
+                except StopIteration:
+                    data_iter = iter(data_loader)
+                    x = next(data_iter)[0]
+                
                 x = noise(x.to(device))
                 model = model
                 optimizer.zero_grad()
@@ -279,42 +288,97 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
-def plot_cov(all_models, D_values, device, N=10, num_curve=100, num_iter=100, lr=1e-3, methods=("euclidian", "piecewise")):
-    """
-    Plots the average CoV against the number of decoders.
-
-    N: Number of points
-    all_models: list containing lists of M models (ensemble).
-    methods: desired training methods to plot
-    *everything else: training parameters
-    """
-
+def plot_cov(
+    all_models, D_values, device,
+    N=10, num_curve=100,
+    num_iter=100, lr=1e-3,
+    methods=("euclidian", "piecewise"),
+    output_file="cov_plot.pdf",
+):
     import seaborn as sns
     from geodesics import compute_avg
+
     sns.set_style("whitegrid")
     sns.set_context("paper")
-    
-    latent_dim = all_models[0][0].prior.latent_dim #get dimension of z
 
-    z = torch.randn(N, latent_dim, device=device) #random latent points
+    latent_dim = all_models[0][0].prior.latent_dim
+    z = torch.randn(N, latent_dim, device=device)
 
     cov_avg = np.zeros((len(D_values), len(methods)))
 
-    plt.figure(figsize=(5.5, 3.5))
-    for i,method in enumerate(methods):
-        for d in D_values:
-            cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method,device=device)
-        plt.plot(D_values, cov_avg[:, i], marker="o", label=method)
-    
-    plt.xlabel("Number of decoders")
-    plt.ylabel("Average CoV")
-    plt.title("CoV of latent distances")
-    plt.legend()
-    plt.xticks(D_values)
-    plt.tight_layout()
+    total_jobs = len(methods) * len(D_values)
+    job = 0
 
-    plt.show()
+    print("\n[plot_cov] Starting CoV computation")
+    print(f"[plot_cov] methods = {list(methods)}")
+    print(f"[plot_cov] decoder counts = {D_values}")
+    print(f"[plot_cov] total CoV evaluations = {total_jobs}\n")
+
+    for i, method in enumerate(methods):
+        for j, d in enumerate(D_values):
+            job += 1
+            print(f"[plot_cov] ({job}/{total_jobs}) method='{method}', decoders={d}")
+
+            cov_avg[j, i] = compute_avg(
+                z,
+                all_models[j],
+                N,
+                num_curve,
+                num_iter,
+                lr,
+                method,
+                device=device
+            )
+
+            print(f"[plot_cov] ({job}/{total_jobs}) finished -> CoV = {cov_avg[j, i]:.6f}\n")
+
+    colors = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860"]
+
+    fig, ax = plt.subplots(figsize=(3.4, 3.2))
     
+    x = np.arange(len(D_values))
+    n_methods = len(methods)
+    total_width = 0.78
+    bar_width = total_width / n_methods
+
+    for i, method in enumerate(methods):
+        offset = (i - (n_methods - 1) / 2) * bar_width
+        ax.bar(
+            x + offset,
+            cov_avg[:, i],
+            width=bar_width * 0.9,
+            label=method,
+            color=colors[i % len(colors)],
+            edgecolor="black",
+            linewidth=0.6,
+            alpha=0.95,
+        )
+
+    ax.set_xlabel("Number of decoders")
+    ax.set_ylabel("Average CoV")
+    ax.set_title("Average CoV of pairwise distances", fontsize=10, pad=6)
+    ax.set_xticks(x)
+    ax.set_xticklabels(D_values)
+
+    ax.legend(
+        frameon=True,
+        fontsize=7,
+        title="Method",
+        title_fontsize=7,
+        loc="best"
+    )
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", linestyle="--", alpha=0.35)
+    ax.set_axisbelow(True)
+
+    plt.tight_layout()
+    plt.savefig(output_file, format="pdf", bbox_inches="tight")
+    plt.show()
+
+    print(f"[plot_cov] Saved figure to: {output_file}")
+
     return
 
 def load_models_for_cov(root_folder, D_values, M, device):
@@ -517,6 +581,12 @@ if __name__ == "__main__":
         action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
         help="Bool about whether to plot in 3d or not. (default: %(default)s)"
     )
+    parser.add_argument(
+        "--cov-output-file",
+        type=str,
+        default="cov_plot.pdf",
+        help="file to save the CoV plot in as PDF (default: %(default)s)",
+    )
     args = parser.parse_args()
     print("# Options")
     for key, value in sorted(vars(args).items()):
@@ -657,5 +727,6 @@ if __name__ == "__main__":
             num_curve=args.num_curves,
             num_iter=args.num_iterations,
             lr=args.lr,
-            methods=args.cov_methods
+            methods=args.cov_methods,
+            output_file=os.path.join(args.experiment_folder, args.cov_output_file)
         )

@@ -320,21 +320,22 @@ def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,nu
 
     return dist_mat
 
-def compute_avg(z,models,N=10,num_curve=100,num_iter=1000,lr=1e-3,curve_method_str="piecewise",device='cpu'):
+def compute_avg(z, models, N=10, num_curve=100, num_iter=1000, lr=1e-3,
+                curve_method_str="piecewise", device='cpu'):
     M = len(models)
 
-    #Compute distance matrix
     dist_mat = generate_dist_mat(
-    z, M, N, models, curve_method_str,
-    num_curve=num_curve, num_iter=num_iter, lr=lr,
-    device=device
+        z, M, N, models, curve_method_str,
+        num_curve=num_curve, num_iter=num_iter, lr=lr,
+        device=device
     )
-    
-    #Compute CoV matrix
+
     cov = compute_cov_matrix(dist_mat)
 
-    mask = np.triu(np.ones((N, N), dtype=bool), k=1) #only different points
-    cov_avg= cov[mask].mean()
+    mask = np.triu(np.ones((N, N), dtype=bool), k=1)
+    cov_avg = cov[mask].mean()
+
+    #print(f"    [done] method={curve_method_str} | M={M} models | N={N} points | average CoV = {cov_avg:.6f}")
 
     return cov_avg
 
@@ -363,7 +364,11 @@ def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_
             )
         curve_points = minimizer.minimize_energy(num_iterations=num_iter).detach().cpu().numpy()
         return np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
-    else: return np.linalg.norm(z2 - z1) #compute eucledian distance
+    else: 
+        with torch.no_grad():
+            x1 = model.decoder(z1.unsqueeze(0)).mean.reshape(-1)
+            x2 = model.decoder(z2.unsqueeze(0)).mean.reshape(-1)
+        return torch.norm(x2 - x1).item() #compute eucledian distance
 
 if __name__ == "__main__":
     # 1. Setup
