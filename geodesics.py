@@ -355,7 +355,7 @@ def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_
 
     if curve_method_str != 'euclidian':
         #Compute the geodesic distance using the decoder
-        curve_method = curve_class(z1, z2, N=N_val, device=device, dim=model.prior.latent_dim)
+        curve_method = curve_class(z1, z2, N=num_curve, device=device, dim=model.prior.latent_dim)
         minimizer = EnergyMinimizer(
                 decoder=model.decoder,
                 curve_method_instance=curve_method,
