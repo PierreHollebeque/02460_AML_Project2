@@ -16,6 +16,8 @@ from copy import deepcopy
 import os
 import math
 import matplotlib.pyplot as plt
+import pandas as pd
+from datetime import datetime
 
 class GaussianPrior(nn.Module):
     def __init__(self, latent_dim):
@@ -294,6 +296,7 @@ def plot_cov(
     num_iter=100, lr=1e-3,
     methods=("euclidian", "piecewise"),
     output_file="cov_plot.pdf",
+    csv_file="cov_results.csv"
 ):
     import seaborn as sns
     from geodesics import compute_avg
@@ -304,7 +307,7 @@ def plot_cov(
     latent_dim = all_models[0][0].prior.latent_dim
     z = torch.randn(N, latent_dim, device=device)
 
-    cov_avg = np.zeros((len(D_values), len(methods)))
+    rows = []
 
     total_jobs = len(methods) * len(D_values)
     job = 0
@@ -319,39 +322,103 @@ def plot_cov(
             job += 1
             print(f"[plot_cov] ({job}/{total_jobs}) method='{method}', decoders={d}")
 
-            cov_avg[j, i] = compute_avg(
-                z,
-                all_models[j],
-                N,
-                num_curve,
-                num_iter,
-                lr,
-                method,
+            stats = compute_avg(
+                z=z,
+                models=all_models[j],
+                N=N,
+                num_curve=num_curve,
+                num_iter=num_iter,
+                lr=lr,
+                curve_method_str=method,
                 device=device
             )
 
-            print(f"[plot_cov] ({job}/{total_jobs}) finished -> CoV = {cov_avg[j, i]:.6f}\n")
+            row = {
+                "timestamp": datetime.now().isoformat(),
+                "method": method,
+                "decoder_count": d,
+                "model_count": len(all_models[j]),
+                "latent_dim": latent_dim,
+                "N_points": N,
+                "num_curve": num_curve,
+                "num_iter": num_iter,
+                "lr": lr,
+                "pair_count": stats["pair_count"],
+                "dist_mean": stats["dist_mean"],
+                "dist_std": stats["dist_std"],
+                "cov_mean": stats["cov_mean"],
+                "cov_std": stats["cov_std"],
+                "energy_start_mean": stats["energy_start_mean"],
+                "energy_start_std": stats["energy_start_std"],
+                "energy_end_mean": stats["energy_end_mean"],
+                "energy_end_std": stats["energy_end_std"],
+                "energy_min_mean": stats["energy_min_mean"],
+                "energy_min_std": stats["energy_min_std"],
+                "energy_mean_mean": stats["energy_mean_mean"],
+                "energy_mean_std": stats["energy_mean_std"],
+            }
+
+            rows.append(row)
+
+            print(f"[plot_cov] ({job}/{total_jobs}) finished -> mean CoV = {stats['cov_mean']:.6f}\n")
+
+    df = pd.DataFrame(rows)
+    df.to_csv(csv_file, index=False)
+    print(f"[plot_cov] Saved CSV to: {csv_file}")
+
+    plot_cov_from_csv(
+        csv_file=csv_file,
+        output_file=output_file
+    )
+
+    return df
+
+def plot_cov_from_csv(csv_file, output_file="cov_plot.pdf", y_col="cov_mean", error_col="cov_std"):
+    import seaborn as sns
+
+    sns.set_style("whitegrid")
+    sns.set_context("paper")
+
+    df = pd.read_csv(csv_file)
+
+    methods = list(df["method"].unique())
+    D_values = sorted(df["decoder_count"].unique())
 
     colors = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860"]
 
     fig, ax = plt.subplots(figsize=(3.4, 3.2))
-    
+
     x = np.arange(len(D_values))
     n_methods = len(methods)
     total_width = 0.78
     bar_width = total_width / n_methods
 
     for i, method in enumerate(methods):
+        df_m = df[df["method"] == method].sort_values("decoder_count")
+        y = df_m[y_col].to_numpy()
+        yerr = df_m[error_col].to_numpy()
+
         offset = (i - (n_methods - 1) / 2) * bar_width
+
         ax.bar(
             x + offset,
-            cov_avg[:, i],
+            y,
             width=bar_width * 0.9,
             label=method,
             color=colors[i % len(colors)],
             edgecolor="black",
             linewidth=0.6,
-            alpha=0.95,
+            alpha=0.95
+        )
+
+        ax.errorbar(
+            x + offset,
+            y,
+            yerr=yerr,
+            fmt="none",
+            ecolor="black",
+            elinewidth=0.8,
+            capsize=3
         )
 
     ax.set_xlabel("Number of decoders")
@@ -377,9 +444,9 @@ def plot_cov(
     plt.savefig(output_file, format="pdf", bbox_inches="tight")
     plt.show()
 
-    print(f"[plot_cov] Saved figure to: {output_file}")
+    print(f"[plot_cov_from_csv] Saved figure to: {output_file}")
 
-    return
+
 
 def load_models_for_cov(root_folder, D_values, M, device):
     print(f"\n[INFO] Loading models from root folder: {root_folder}")
@@ -570,6 +637,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--cov-csv-file",
+        type=str,
+        default="cov_results.csv",
+        help="file to save the CoV statistics CSV in (default: %(default)s)",
+    )
+
+    parser.add_argument(
         "--cov-methods",
         type=str,
         nargs="+",
@@ -728,5 +802,6 @@ if __name__ == "__main__":
             num_iter=args.num_iterations,
             lr=args.lr,
             methods=args.cov_methods,
-            output_file=os.path.join(args.experiment_folder, args.cov_output_file)
+            output_file=os.path.join(args.experiment_folder, args.cov_output_file),
+            csv_file=os.path.join(args.experiment_folder, args.cov_csv_file)
         )

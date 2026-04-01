@@ -18,21 +18,31 @@ class EnergyMinimizer:
         self.curve_method = curve_method_instance
         self.optimizer = optimizer_class([self.curve_method.parameters], lr=lr)
     
-    def minimize_energy(self, num_iterations=100):
-        """Minimizes the curve's energy via gradient descent."""
-        pbar = tqdm(range(num_iterations), desc=f"Minimizing Energy for {type(self.curve_method).__name__}", leave=False)
+    def minimize_energy(self, num_iterations=100, return_history=False):
+        energy_history = []
+
+        pbar = tqdm(
+            range(num_iterations),
+            desc=f"Minimizing Energy for {type(self.curve_method).__name__}",
+            leave=False
+        )
 
         for i in pbar:
             self.optimizer.zero_grad()
-            
-            energy = self.curve_method.calculate_energy(self.decoder) 
-            
+
+            energy = self.curve_method.calculate_energy(self.decoder)
             energy.backward()
             self.optimizer.step()
-            
-            pbar.set_postfix({"E": f"{energy.item():.4f}"})
-            
-        return self.curve_method.get_full_curve_points()
+
+            e = energy.item()
+            energy_history.append(e)
+            pbar.set_postfix({"E": f"{e:.4f}"})
+
+        curve_points = self.curve_method.get_full_curve_points()
+
+        if return_history:
+            return curve_points, energy_history
+        return curve_points
 
 
 class CurveMethod:
@@ -299,78 +309,191 @@ def compute_cov_matrix(D):
 
     return cov
 
-def generate_dist_mat(z,M,N,models,curve_method_str="piecewise",num_curve=100,num_iter=1000,lr=1e-3,full_matrix=0,device='cpu'):
-    """
-    Generates distance matrix for an array of points x
-    z: (N,latent_dim) array of points
-    M: Ensemble Count
-    N: Number of points
-    models: M models with same amount of decoders
-    """
-    dist_mat = np.zeros((M,N,N))
+def generate_dist_mat(
+    z, M, N, models,
+    curve_method_str="piecewise",
+    num_curve=100,
+    num_iter=1000,
+    lr=1e-3,
+    full_matrix=0,
+    device='cpu'
+):
+    dist_mat = np.zeros((M, N, N))
+    energy_start_mat = np.full((M, N, N), np.nan)
+    energy_end_mat = np.full((M, N, N), np.nan)
+    energy_min_mat = np.full((M, N, N), np.nan)
+    energy_mean_mat = np.full((M, N, N), np.nan)
 
     total_pairs = N * (N - 1) // 2
+
     for m in tqdm(range(M), desc="Models"):
         pair_bar = tqdm(total=total_pairs, desc=f"Pairs (model {m+1}/{M})", leave=False)
+
         for i in range(N):
             for j in range(i + 1, N):
-                dist_mat[m,i,j]=compute_geodesic(z[i],z[j],models[m],curve_method_str,num_curve,num_iter,lr,device=device)
+                meta = compute_geodesic(
+                    z[i], z[j], models[m],
+                    curve_method_str=curve_method_str,
+                    num_curve=num_curve,
+                    num_iter=num_iter,
+                    lr=lr,
+                    device=device,
+                    return_metadata=True
+                )
+
+                dist_mat[m, i, j] = meta["distance"]
+                energy_start_mat[m, i, j] = meta["energy_start"]
+                energy_end_mat[m, i, j] = meta["energy_end"]
+                energy_min_mat[m, i, j] = meta["energy_min"]
+                energy_mean_mat[m, i, j] = meta["energy_mean"]
+
                 pair_bar.update(1)
+
         pair_bar.close()
+
         if full_matrix:
-            dist_mat[m,:,:] = dist_mat[m,:,:] + dist_mat[m,:,:].T
+            dist_mat[m] = dist_mat[m] + dist_mat[m].T
+            energy_start_mat[m] = energy_start_mat[m] + energy_start_mat[m].T
+            energy_end_mat[m] = energy_end_mat[m] + energy_end_mat[m].T
+            energy_min_mat[m] = energy_min_mat[m] + energy_min_mat[m].T
+            energy_mean_mat[m] = energy_mean_mat[m] + energy_mean_mat[m].T
 
-    return dist_mat
+    return {
+        "dist_mat": dist_mat,
+        "energy_start_mat": energy_start_mat,
+        "energy_end_mat": energy_end_mat,
+        "energy_min_mat": energy_min_mat,
+        "energy_mean_mat": energy_mean_mat
+    }
 
-def compute_avg(z, models, N=10, num_curve=100, num_iter=1000, lr=1e-3,
-                curve_method_str="piecewise", device='cpu'):
+def compute_avg(
+    z, models,
+    N=10,
+    num_curve=100,
+    num_iter=1000,
+    lr=1e-3,
+    curve_method_str="piecewise",
+    device='cpu'
+):
     M = len(models)
 
-    dist_mat = generate_dist_mat(
-        z, M, N, models, curve_method_str,
-        num_curve=num_curve, num_iter=num_iter, lr=lr,
+    results = generate_dist_mat(
+        z=z,
+        M=M,
+        N=N,
+        models=models,
+        curve_method_str=curve_method_str,
+        num_curve=num_curve,
+        num_iter=num_iter,
+        lr=lr,
         device=device
     )
 
+    dist_mat = results["dist_mat"]
     cov = compute_cov_matrix(dist_mat)
 
     mask = np.triu(np.ones((N, N), dtype=bool), k=1)
-    cov_avg = cov[mask].mean()
 
-    #print(f"    [done] method={curve_method_str} | M={M} models | N={N} points | average CoV = {cov_avg:.6f}")
+    dist_vals = dist_mat[:, mask]
+    cov_vals = cov[mask]
+    energy_start_vals = results["energy_start_mat"][:, mask]
+    energy_end_vals = results["energy_end_mat"][:, mask]
+    energy_min_vals = results["energy_min_mat"][:, mask]
+    energy_mean_vals = results["energy_mean_mat"][:, mask]
 
-    return cov_avg
+    summary = {
+        "dist_mean": float(np.nanmean(dist_vals)),
+        "dist_std": float(np.nanstd(dist_vals)),
+        "cov_mean": float(np.nanmean(cov_vals)),
+        "cov_std": float(np.nanstd(cov_vals)),
+        "energy_start_mean": float(np.nanmean(energy_start_vals)),
+        "energy_start_std": float(np.nanstd(energy_start_vals)),
+        "energy_end_mean": float(np.nanmean(energy_end_vals)),
+        "energy_end_std": float(np.nanstd(energy_end_vals)),
+        "energy_min_mean": float(np.nanmean(energy_min_vals)),
+        "energy_min_std": float(np.nanstd(energy_min_vals)),
+        "energy_mean_mean": float(np.nanmean(energy_mean_vals)),
+        "energy_mean_std": float(np.nanstd(energy_mean_vals)),
+        "pair_count": int(mask.sum()),
+        "M": M,
+        "N": N,
+        "dist_mat": dist_mat,
+        "cov_mat": cov
+    }
 
-def compute_geodesic(z1,z2,model,curve_method_str="piecewise",num_curve=100,num_iter=100,lr=1e-3,device='cpu'):
-    """
-    Temporary computation for geodesic between two point vectors.
-    """
+    return summary
+
+def compute_geodesic(
+    z1, z2, model,
+    curve_method_str="piecewise",
+    num_curve=100,
+    num_iter=100,
+    lr=1e-3,
+    device='cpu',
+    return_metadata=False
+):
     if curve_method_str == 'piecewise':
         curve_class = Piecewise
-        N_val = num_curve
     elif curve_method_str == 'polynomial':
         curve_class = PolynomialCurve
     elif curve_method_str == 'euclidian':
-        pass
+        curve_class = None
     else:
         raise ValueError(f"Unknown curve method: {curve_method_str}")
 
-    if curve_method_str != 'euclidian':
-        #Compute the geodesic distance using the decoder
-        curve_method = curve_class(z1, z2, N=num_curve, device=device, dim=model.prior.latent_dim)
-        minimizer = EnergyMinimizer(
-                decoder=model.decoder,
-                curve_method_instance=curve_method,
-                optimizer_class=optim.Adam,
-                lr=lr
-            )
-        curve_points = minimizer.minimize_energy(num_iterations=num_iter).detach().cpu().numpy()
-        return np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
-    else: 
+    if curve_method_str == 'euclidian':
         with torch.no_grad():
             x1 = model.decoder(z1.unsqueeze(0)).mean.reshape(-1)
             x2 = model.decoder(z2.unsqueeze(0)).mean.reshape(-1)
-        return torch.norm(x2 - x1).item() #compute eucledian distance
+            dist = torch.norm(x2 - x1).item()
+
+        meta = {
+            "distance": dist,
+            "energy_start": np.nan,
+            "energy_end": np.nan,
+            "energy_min": np.nan,
+            "energy_mean": np.nan,
+            "energy_history": []
+        }
+
+        if return_metadata:
+            return meta
+        return dist
+
+    curve_method = curve_class(
+        z1, z2,
+        N=num_curve,
+        device=device,
+        dim=model.prior.latent_dim
+    )
+
+    minimizer = EnergyMinimizer(
+        decoder=model.decoder,
+        curve_method_instance=curve_method,
+        optimizer_class=optim.Adam,
+        lr=lr
+    )
+
+    curve_points, energy_history = minimizer.minimize_energy(
+        num_iterations=num_iter,
+        return_history=True
+    )
+
+    curve_points = curve_points.detach().cpu().numpy()
+    dist = np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
+
+    meta = {
+        "distance": dist,
+        "energy_start": float(energy_history[0]) if len(energy_history) > 0 else np.nan,
+        "energy_end": float(energy_history[-1]) if len(energy_history) > 0 else np.nan,
+        "energy_min": float(np.min(energy_history)) if len(energy_history) > 0 else np.nan,
+        "energy_mean": float(np.mean(energy_history)) if len(energy_history) > 0 else np.nan,
+        "energy_history": energy_history
+    }
+
+    if return_metadata:
+        return meta
+    return dist
 
 if __name__ == "__main__":
     # 1. Setup
