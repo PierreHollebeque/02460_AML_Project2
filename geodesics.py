@@ -470,12 +470,16 @@ def compute_geodesic(
     )
 
     curve_points, energy_history = minimizer.minimize_energy(
-        num_iterations=num_iter,
-        return_history=True
+    num_iterations=num_iter,
+    return_history=True
     )
 
-    curve_points = curve_points.detach().cpu().numpy()
-    dist = np.linalg.norm(np.diff(curve_points, axis=0), axis=1).sum()
+    with torch.no_grad():
+        x_curve = model.decoder(curve_points).mean
+
+    x_curve = x_curve.detach().cpu().numpy()
+    x_curve = x_curve.reshape(x_curve.shape[0], -1)
+    dist = np.linalg.norm(np.diff(x_curve, axis=0), axis=1).sum()
 
     meta = {
         "distance": dist,
