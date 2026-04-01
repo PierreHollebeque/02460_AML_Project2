@@ -10,14 +10,9 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 import torch.utils.data
-import numpy as np
 from tqdm import tqdm
-from copy import deepcopy
 import os
-import math
-import matplotlib.pyplot as plt
-import pandas as pd
-from datetime import datetime
+
 
 class GaussianPrior(nn.Module):
     def __init__(self, latent_dim):
@@ -290,208 +285,6 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
-def plot_cov(
-    all_models, D_values, device,
-    N=10, num_curve=100,
-    num_iter=100, lr=1e-3,
-    methods=("euclidian", "piecewise"),
-    output_file="cov_plot.pdf",
-    csv_file="cov_results.csv"
-):
-    import seaborn as sns
-    from geodesics import compute_avg
-
-    sns.set_style("whitegrid")
-    sns.set_context("paper")
-
-    latent_dim = all_models[0][0].prior.latent_dim
-    z = torch.randn(N, latent_dim, device=device)
-
-    rows = []
-
-    total_jobs = len(methods) * len(D_values)
-    job = 0
-
-    print("\n[plot_cov] Starting CoV computation")
-    print(f"[plot_cov] methods = {list(methods)}")
-    print(f"[plot_cov] decoder counts = {D_values}")
-    print(f"[plot_cov] total CoV evaluations = {total_jobs}\n")
-
-    for i, method in enumerate(methods):
-        for j, d in enumerate(D_values):
-            job += 1
-            print(f"[plot_cov] ({job}/{total_jobs}) method='{method}', decoders={d}")
-
-            stats = compute_avg(
-                z=z,
-                models=all_models[j],
-                N=N,
-                num_curve=num_curve,
-                num_iter=num_iter,
-                lr=lr,
-                curve_method_str=method,
-                device=device
-            )
-
-            row = {
-                "timestamp": datetime.now().isoformat(),
-                "method": method,
-                "decoder_count": d,
-                "model_count": len(all_models[j]),
-                "latent_dim": latent_dim,
-                "N_points": N,
-                "num_curve": num_curve,
-                "num_iter": num_iter,
-                "lr": lr,
-                "pair_count": stats["pair_count"],
-                "dist_mean": stats["dist_mean"],
-                "dist_std": stats["dist_std"],
-                "cov_mean": stats["cov_mean"],
-                "cov_std": stats["cov_std"],
-                "energy_start_mean": stats["energy_start_mean"],
-                "energy_start_std": stats["energy_start_std"],
-                "energy_end_mean": stats["energy_end_mean"],
-                "energy_end_std": stats["energy_end_std"],
-                "energy_min_mean": stats["energy_min_mean"],
-                "energy_min_std": stats["energy_min_std"],
-                "energy_mean_mean": stats["energy_mean_mean"],
-                "energy_mean_std": stats["energy_mean_std"],
-            }
-
-            rows.append(row)
-
-            print(f"[plot_cov] ({job}/{total_jobs}) finished -> mean CoV = {stats['cov_mean']:.6f}\n")
-
-    df = pd.DataFrame(rows)
-    df.to_csv(csv_file, index=False)
-    print(f"[plot_cov] Saved CSV to: {csv_file}")
-
-    plot_cov_from_csv(
-        csv_file=csv_file,
-        output_file=output_file
-    )
-
-    return df
-
-def plot_cov_from_csv(csv_file, output_file="cov_plot.pdf", y_col="cov_mean", error_col="cov_std"):
-    import seaborn as sns
-
-    sns.set_style("whitegrid")
-    sns.set_context("paper")
-
-    df = pd.read_csv(csv_file)
-
-    methods = list(df["method"].unique())
-    D_values = sorted(df["decoder_count"].unique())
-
-    colors = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860"]
-
-    fig, ax = plt.subplots(figsize=(3.4, 3.2))
-
-    x = np.arange(len(D_values))
-    n_methods = len(methods)
-    total_width = 0.78
-    bar_width = total_width / n_methods
-
-    for i, method in enumerate(methods):
-        df_m = df[df["method"] == method].sort_values("decoder_count")
-        y = df_m[y_col].to_numpy()
-        yerr = df_m[error_col].to_numpy()
-
-        offset = (i - (n_methods - 1) / 2) * bar_width
-
-        ax.bar(
-            x + offset,
-            y,
-            width=bar_width * 0.9,
-            label=method,
-            color=colors[i % len(colors)],
-            edgecolor="black",
-            linewidth=0.6,
-            alpha=0.95
-        )
-
-        ax.errorbar(
-            x + offset,
-            y,
-            yerr=yerr,
-            fmt="none",
-            ecolor="black",
-            elinewidth=0.8,
-            capsize=3
-        )
-
-    ax.set_xlabel("Number of decoders")
-    ax.set_ylabel("Average CoV")
-    ax.set_title("Average CoV of pairwise distances", fontsize=10, pad=6)
-    ax.set_xticks(x)
-    ax.set_xticklabels(D_values)
-
-    ax.legend(
-        frameon=True,
-        fontsize=7,
-        title="Method",
-        title_fontsize=7,
-        loc="best"
-    )
-
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.grid(axis="y", linestyle="--", alpha=0.35)
-    ax.set_axisbelow(True)
-
-    plt.tight_layout()
-    plt.savefig(output_file, format="pdf", bbox_inches="tight")
-    plt.show()
-
-    print(f"[plot_cov_from_csv] Saved figure to: {output_file}")
-
-
-
-def load_models_for_cov(root_folder, D_values, M, device):
-    print(f"\n[INFO] Loading models from root folder: {root_folder}")
-    print(f"[INFO] Target decoder counts D: {D_values}")
-    print(f"[INFO] Models per D (M): {M}\n")
-
-    all_models = []
-
-    for d in D_values:
-        subfolder = os.path.join(root_folder, f"{d}_decoders")
-        print(f"[INFO] Checking folder: {subfolder}")
-
-        if not os.path.isdir(subfolder):
-            raise FileNotFoundError(f"[ERROR] Missing folder: {subfolder}")
-
-        all_files = sorted(os.listdir(subfolder))
-        model_files = [f for f in all_files if f.endswith(".pt")]
-
-        print(f"[INFO] Found {len(model_files)} .pt files")
-
-        model_files = model_files[:M]
-
-        if len(model_files) < M:
-            raise ValueError(
-                f"[ERROR] Folder {subfolder} only contains {len(model_files)} model files, but M={M}"
-            )
-
-        print(f"[INFO] Using files: {model_files}")
-
-        models_d = []
-        for i, fname in enumerate(model_files):
-            model_path = os.path.join(subfolder, fname)
-            print(f"[LOAD] ({i+1}/{M}) Loading: {model_path}")
-
-            model, _ = vae_load(model_path, device)
-            model.eval()
-
-            models_d.append(model)
-
-        print(f"[DONE] Loaded {len(models_d)} models for D={d}\n")
-
-        all_models.append(models_d)
-
-    print("[SUCCESS] Finished loading all models.\n")
-    return all_models
 
 
 if __name__ == "__main__":
@@ -500,81 +293,69 @@ if __name__ == "__main__":
 
     # Parse arguments
     import argparse
-
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "mode",
+    parser.add_argument("mode",
         type=str,
         default="train",
         choices=["train", "sample", "eval", "geodesics", "plot_cov"],
         help="what to do when running the script (default: %(default)s)",
     )
-    parser.add_argument(
-        "--experiment-folder",
+    parser.add_argument("--experiment-folder",
         type=str,
         default="experiment",
         help="folder to save and load experiment results in (default: %(default)s)",
     )
 
-    parser.add_argument(
-        "--model-name",
+    parser.add_argument("--model-name",
         type=str,
         default="model.pt",
         help="name of the model file (default: %(default)s)",
     )
 
 
-    parser.add_argument(
-        "--samples",
+    parser.add_argument("--samples",
         type=str,
         default="samples.png",
         help="file to save samples in (default: %(default)s)",
     )
 
-    parser.add_argument(
-        "--device",
+    parser.add_argument("--device",
         type=str,
         default="cpu",
         choices=["cpu", "cuda", "mps"],
         help="torch device (default: %(default)s)",
     )
-    parser.add_argument(
-        "--batch-size",
+    parser.add_argument("--batch-size",
         type=int,
         default=32,
         metavar="N",
         help="batch size for training (default: %(default)s)",
     )
-    parser.add_argument(
-        "--epochs-per-decoder",
+    parser.add_argument("--epochs-per-decoder",
         type=int,
         default=50,
         metavar="N",
         help="number of training epochs per each decoder (default: %(default)s)",
     )
-    parser.add_argument(
-        "--latent-dim",
+    parser.add_argument("--latent-dim",
         type=int,
         default=2,
         metavar="N",
         help="dimension of latent variable (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-decoders",
+    parser.add_argument("--num-decoders",
         type=int,
         default=1,
         metavar="N",
         help="number of decoders in the ensemble (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-reruns",
+    parser.add_argument("--num-reruns",
         type=int,
         default=10,
         metavar="N",
         help="number of reruns (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-curves",
+    parser.add_argument("--num-curves",
         type=int,
         default=10,
         metavar="N",
@@ -582,81 +363,69 @@ if __name__ == "__main__":
     )
 
     # Arguments for geodesics calculation
-    parser.add_argument(
-        "--N",
+    parser.add_argument("--N",
         type=int,
         default=30,
         metavar="N",
         help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
     )
-    parser.add_argument(
-        "--seed-geo",
+    parser.add_argument("--seed-geo",
         type=int,
         default=0,
         metavar="N",
         help="Seed for geodesics calculation (default: %(default)s)",
     )
-    parser.add_argument(
-        '--curve-method', 
+    parser.add_argument('--curve-method', 
         type=str, 
         default='piecewise', 
         choices=['piecewise', 'polynomial'],
         help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)'
     )
-    parser.add_argument(
-        '--num-iterations', 
+    parser.add_argument('--num-iterations', 
         type=int, 
         default=300,
         help='Number of optimization iterations for geodesics. (default: %(default)s)'
     )
-    parser.add_argument(
-        '--lr', 
+    parser.add_argument('--lr', 
         type=float, 
         default=0.05,
         help='Learning rate for the geodesic optimizer. (default: %(default)s)'
     )
-    parser.add_argument(
-        "--output-file",
+    parser.add_argument("--output-file",
         type=str,
         default="geodesics.png",
         help="file to save the geodesics plot in (default: %(default)s)",
     )
-    parser.add_argument(
-    "--M",
-    type=int,
-    default=10,
-    help="Number of rerun models to load per decoder count for plot_cov."
+    parser.add_argument("--M",
+        type=int,
+        default=10,
+        help="Number of rerun models to load per decoder count for plot_cov."
     )
 
-    parser.add_argument(
-        "--D",
+    parser.add_argument("--D",
         type=int,
         nargs="+",
         default=[1, 2, 3],
         help="Decoder counts to include in plot_cov, e.g. --D 1 2 3"
     )
 
-    parser.add_argument(
-        "--cov-csv-file",
+    parser.add_argument("--cov-csv-file",
         type=str,
         default="cov_results.csv",
         help="file to save the CoV statistics CSV in (default: %(default)s)",
     )
 
-    parser.add_argument(
-        "--cov-methods",
+    parser.add_argument("--cov-methods",
         type=str,
         nargs="+",
-        default=["euclidian", "piecewise"],
-        help='Methods for CoV plot, e.g. --cov-methods euclidian piecewise polynomial'
+        default=["euclidean", "piecewise"],
+        help='Methods for CoV plot, e.g. --cov-methods euclidean piecewise polynomial'
     )
-    parser.add_argument(
-        "--three-dim",
+    parser.add_argument("--three-dim",
         action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
         help="Bool about whether to plot in 3d or not. (default: %(default)s)"
     )
-    parser.add_argument(
-        "--cov-output-file",
+    parser.add_argument("--cov-output-file",
         type=str,
         default="cov_plot.pdf",
         help="file to save the CoV plot in as PDF (default: %(default)s)",
@@ -786,10 +555,11 @@ if __name__ == "__main__":
             three_d=args.three_dim
         )
     elif args.mode == "plot_cov":
+        from covariance import plot_cov, load_models_for_cov
         all_models = load_models_for_cov(
             root_folder=args.experiment_folder,
             D_values=args.D,
-            M=args.M,
+            num_models_per_D=args.M,
             device=device
         )
 

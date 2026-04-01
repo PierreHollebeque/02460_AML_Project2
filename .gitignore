@@ -2,3 +2,5 @@ data/
 exp/
 experiment/
 __pycache__/
+.vscode/
+runs.txt

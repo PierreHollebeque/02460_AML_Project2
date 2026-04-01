@@ -3,10 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim # Import for optimizer, e.g., Adam
 import argparse # Added for command-line arguments
-import torch.nn as nn
 from tqdm import tqdm # Import tqdm for progress bar
-# Import VAE components from ensemble_vae.py
-from ensemble_vae import VAE, GaussianPrior, GaussianEncoder, GaussianDecoder, new_decoder, new_encoder, vae_load
 import plotly.graph_objects as go
 
 
@@ -310,7 +307,7 @@ def compute_cov_matrix(D):
     return cov
 
 def generate_dist_mat(
-    z, M, N, models,
+    z, N, models,
     curve_method_str="piecewise",
     num_curve=100,
     num_iter=1000,
@@ -318,16 +315,17 @@ def generate_dist_mat(
     full_matrix=0,
     device='cpu'
 ):
-    dist_mat = np.zeros((M, N, N))
-    energy_start_mat = np.full((M, N, N), np.nan)
-    energy_end_mat = np.full((M, N, N), np.nan)
-    energy_min_mat = np.full((M, N, N), np.nan)
-    energy_mean_mat = np.full((M, N, N), np.nan)
+    num_models_per_D = len(models)
+    dist_mat = np.zeros((num_models_per_D, N, N))
+    energy_start_mat = np.full((num_models_per_D, N, N), np.nan)
+    energy_end_mat = np.full((num_models_per_D, N, N), np.nan)
+    energy_min_mat = np.full((num_models_per_D, N, N), np.nan)
+    energy_mean_mat = np.full((num_models_per_D, N, N), np.nan)
 
     total_pairs = N * (N - 1) // 2
 
-    for m in tqdm(range(M), desc="Models"):
-        pair_bar = tqdm(total=total_pairs, desc=f"Pairs (model {m+1}/{M})", leave=False)
+    for m in tqdm(range(num_models_per_D), desc="Models"):
+        pair_bar = tqdm(total=total_pairs, desc=f"Pairs (model {m+1}/{num_models_per_D})", leave=False)
 
         for i in range(N):
             for j in range(i + 1, N):
@@ -366,7 +364,7 @@ def generate_dist_mat(
         "energy_mean_mat": energy_mean_mat
     }
 
-def compute_avg(
+def cov_matrix_stats(
     z, models,
     N=10,
     num_curve=100,
@@ -375,11 +373,8 @@ def compute_avg(
     curve_method_str="piecewise",
     device='cpu'
 ):
-    M = len(models)
-
     results = generate_dist_mat(
         z=z,
-        M=M,
         N=N,
         models=models,
         curve_method_str=curve_method_str,
@@ -415,7 +410,7 @@ def compute_avg(
         "energy_mean_mean": float(np.nanmean(energy_mean_vals)),
         "energy_mean_std": float(np.nanstd(energy_mean_vals)),
         "pair_count": int(mask.sum()),
-        "M": M,
+        "M": len(models),
         "N": N,
         "dist_mat": dist_mat,
         "cov_mat": cov
@@ -436,12 +431,12 @@ def compute_geodesic(
         curve_class = Piecewise
     elif curve_method_str == 'polynomial':
         curve_class = PolynomialCurve
-    elif curve_method_str == 'euclidian':
+    elif curve_method_str == 'euclidean':
         curve_class = None
     else:
         raise ValueError(f"Unknown curve method: {curve_method_str}")
 
-    if curve_method_str == 'euclidian':
+    if curve_method_str == 'euclidean':
         with torch.no_grad():
             x1 = model.decoder(z1.unsqueeze(0)).mean.reshape(-1)
             x2 = model.decoder(z2.unsqueeze(0)).mean.reshape(-1)
@@ -525,6 +520,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 1.2. Load VAE model
+    from ensemble_vae import vae_load
     model, parameters = vae_load(args.vae_model_path, device)
     latent_dim = parameters['latent_dim']
     
