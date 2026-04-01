@@ -20,15 +20,17 @@ class EnergyMinimizer:
     
     def minimize_energy(self, num_iterations=100):
         """Minimizes the curve's energy via gradient descent."""
-        for i in tqdm(range(num_iterations), desc=f"Minimizing Energy for {type(self.curve_method).__name__}", leave=False):
+        pbar = tqdm(range(num_iterations), desc=f"Minimizing Energy for {type(self.curve_method).__name__}", leave=False)
 
+        for i in pbar:
             self.optimizer.zero_grad()
             
-            # Calculate energy using the curve's specific implementation
             energy = self.curve_method.calculate_energy(self.decoder) 
             
             energy.backward()
             self.optimizer.step()
+            
+            pbar.set_postfix({"E": f"{energy.item():.4f}"})
             
         return self.curve_method.get_full_curve_points()
 
