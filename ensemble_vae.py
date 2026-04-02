@@ -366,9 +366,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--N",
         type=int,
-        default=10,
-        metavar="N",
-        help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
+        nargs="+", # Allow multiple integer values
+        default=[10], # Default now a list for consistency with nargs="+"
+        metavar="N_VAL",
+        help="Number of intermediate points for Piecewise or coefficients for Polynomial. "
+             "For 'covariance' mode, provide a list matching --cov-methods length. "
+             "For 'geodesics' mode, only the first value is used. (default: %(default)s)",
     )
     parser.add_argument("--seed-geo",
         type=int,
@@ -549,7 +552,7 @@ if __name__ == "__main__":
             curve_method_str=args.curve_method,
             num_iterations=args.num_iterations,
             lr=args.lr,
-            N=args.N,
+            N=args.N[0], # For geodesics mode, use the first N value
             num_geodesics=args.num_geodesics,
             output_filename=args.experiment_folder + "/" +args.output_file,
             seed=args.seed_geo,
@@ -557,6 +560,10 @@ if __name__ == "__main__":
         )
     elif args.mode == "covariance":
         from covariance import plot_cov, load_models_for_cov
+        if len(args.N) != len(args.cov_methods):
+            raise ValueError(
+                f"The number of N values ({len(args.N)}) must match the number of covariance methods ({len(args.cov_methods)})."
+            )
         all_models = load_models_for_cov(
             root_folder=args.experiment_folder,
             D_values=args.D,
@@ -569,7 +576,7 @@ if __name__ == "__main__":
             D_values=args.D,
             device=device,
             num_latent_points=args.num_geodesics, # Number of latent points for the covariance matrix
-            number_parameters_geodesic=args.N, # Number of parameters for the geodesic args.N as intended
+            number_parameters_geodesic_list=args.N,
             num_iter=args.num_iterations,
             lr=args.lr,
             methods=args.cov_methods,

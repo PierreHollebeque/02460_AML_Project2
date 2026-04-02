@@ -11,7 +11,7 @@ from geodesics import compute_geodesic
 
 def plot_cov(
     all_models, D_values, device,
-    num_latent_points=10, number_parameters_geodesic=100,
+    num_latent_points=10, number_parameters_geodesic_list=None,
     num_iter=100, lr=1e-3, 
     methods=("euclidean", "piecewise"),
     output_file="cov_plot.pdf",
@@ -36,6 +36,8 @@ def plot_cov(
     print(f"[plot_cov] total CoV evaluations = {total_jobs}\n")
 
     for i, method in enumerate(methods):
+        current_N = number_parameters_geodesic_list[i] if number_parameters_geodesic_list else 10
+
         for j, d in enumerate(D_values):
             job += 1
             print(f"[plot_cov] ({job}/{total_jobs}) method=f'{method}', decoders={d}")
@@ -44,7 +46,7 @@ def plot_cov(
                 z=z,
                 models=all_models[j],
                 num_latent_points=num_latent_points,
-                number_parameters_geodesic=number_parameters_geodesic,
+                number_parameters_geodesic=current_N, 
                 num_iter=num_iter,
                 lr=lr,
                 curve_method_str=method,
@@ -58,7 +60,7 @@ def plot_cov(
                 "model_count": len(all_models[j]),
                 "latent_dim": latent_dim,
                 "num_latent_points": num_latent_points,
-                "number_parameters_geodesic": number_parameters_geodesic,
+                "number_parameters_geodesic": current_N, # Store the specific N used
                 "num_iter": num_iter,
                 "lr": lr,
                 "pair_count": stats["pair_count"],
