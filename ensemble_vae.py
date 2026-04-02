@@ -297,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("mode",
         type=str,
         default="train",
-        choices=["train", "sample", "eval", "geodesics", "plot_cov"],
+        choices=["train", "sample", "eval", "geodesics", "covariance"],
         help="what to do when running the script (default: %(default)s)",
     )
     parser.add_argument("--experiment-folder",
@@ -355,17 +355,18 @@ if __name__ == "__main__":
         metavar="N",
         help="number of reruns (default: %(default)s)",
     )
-    parser.add_argument("--num-curves",
+
+    # Arguments for geodesics calculation
+    parser.add_argument("--num-geodesics",
         type=int,
         default=10,
         metavar="N",
-        help="number of geodesics to plot (default: %(default)s)",
+        help="number of geodesics or number of latent points to sample for the covariance matrix calculation (default: %(default)s)",
     )
 
-    # Arguments for geodesics calculation
     parser.add_argument("--N",
         type=int,
-        default=30,
+        default=10,
         metavar="N",
         help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
     )
@@ -375,21 +376,21 @@ if __name__ == "__main__":
         metavar="N",
         help="Seed for geodesics calculation (default: %(default)s)",
     )
-    parser.add_argument('--curve-method', 
+    parser.add_argument("--curve-method", 
         type=str, 
-        default='piecewise', 
-        choices=['piecewise', 'polynomial'],
-        help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)'
+        default="piecewise", 
+        choices=["piecewise", "polynomial"],
+        help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)',
     )
-    parser.add_argument('--num-iterations', 
+    parser.add_argument("--num-iterations", 
         type=int, 
         default=300,
-        help='Number of optimization iterations for geodesics. (default: %(default)s)'
+        help="Number of optimization iterations for geodesics. (default: %(default)s)"
     )
-    parser.add_argument('--lr', 
+    parser.add_argument("--lr", 
         type=float, 
         default=0.05,
-        help='Learning rate for the geodesic optimizer. (default: %(default)s)'
+        help="Learning rate for the geodesic optimizer. (default: %(default)s)"
     )
     parser.add_argument("--output-file",
         type=str,
@@ -399,14 +400,14 @@ if __name__ == "__main__":
     parser.add_argument("--M",
         type=int,
         default=10,
-        help="Number of rerun models to load per decoder count for plot_cov."
+        help="Number of rerun models to load per decoder count for covariance calculation."
     )
 
     parser.add_argument("--D",
         type=int,
         nargs="+",
         default=[1, 2, 3],
-        help="Decoder counts to include in plot_cov, e.g. --D 1 2 3"
+        help="Decoder counts to include in covariance calculation, e.g. --D 1 2 3"
     )
 
     parser.add_argument("--cov-csv-file",
@@ -419,10 +420,10 @@ if __name__ == "__main__":
         type=str,
         nargs="+",
         default=["euclidean", "piecewise"],
-        help='Methods for CoV plot, e.g. --cov-methods euclidean piecewise polynomial'
+        help="Methods for CoV plot, e.g. --cov-methods euclidean piecewise polynomial"
     )
     parser.add_argument("--three-dim",
-        action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
+        action="store_true", # Changed type=bool to action="store_true" for correct boolean parsing
         help="Bool about whether to plot in 3d or not. (default: %(default)s)"
     )
     parser.add_argument("--cov-output-file",
@@ -544,17 +545,17 @@ if __name__ == "__main__":
         calculate_and_plot_geodesics(
             model=model,
             device=device,
-            latent_dim=parameters['latent_dim'],
+            latent_dim=parameters["latent_dim"],
             curve_method_str=args.curve_method,
             num_iterations=args.num_iterations,
             lr=args.lr,
             N=args.N,
-            num_geodesics_to_plot=args.num_curves,
+            num_geodesics=args.num_geodesics,
             output_filename=args.experiment_folder + "/" +args.output_file,
             seed=args.seed_geo,
             three_d=args.three_dim
         )
-    elif args.mode == "plot_cov":
+    elif args.mode == "covariance":
         from covariance import plot_cov, load_models_for_cov
         all_models = load_models_for_cov(
             root_folder=args.experiment_folder,
@@ -567,8 +568,8 @@ if __name__ == "__main__":
             all_models=all_models,
             D_values=args.D,
             device=device,
-            N=args.N,
-            num_curve=args.num_curves,
+            num_latent_points=args.num_geodesics, # Number of latent points for the covariance matrix
+            number_parameters_geodesic=args.N, # Number of parameters for the geodesic args.N as intended
             num_iter=args.num_iterations,
             lr=args.lr,
             methods=args.cov_methods,

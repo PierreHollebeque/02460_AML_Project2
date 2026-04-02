@@ -1,0 +1,4 @@
+timestamp,method,decoder_count,model_count,latent_dim,num_latent_points,number_parameters_geodesic,num_iter,lr,pair_count,dist_mean,dist_std,cov_mean,cov_std,energy_start_mean,energy_start_std,energy_end_mean,energy_end_std,energy_min_mean,energy_min_std,energy_mean_mean,energy_mean_std
+2026-04-02T02:25:32.490525,euclidean,1,10,2,10,5,10,0.05,10,4.766255632638932,2.1861786060727213,0.13778130050953766,0.045302132585198815,,,,,,,,
+2026-04-02T02:25:33.227672,euclidean,2,10,2,10,5,10,0.05,10,6.853156713247299,3.327598150983764,0.13555315104733973,0.053861017663552384,,,,,,,,
+2026-04-02T02:25:34.215150,euclidean,3,10,2,10,5,10,0.05,10,8.134282454252244,4.678170619833073,0.23925643923967527,0.06097332035977207,,,,,,,,

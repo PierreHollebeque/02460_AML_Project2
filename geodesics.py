@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim # Import for optimizer, e.g., Adam
-import argparse # Added for command-line arguments
 from tqdm import tqdm # Import tqdm for progress bar
 import plotly.graph_objects as go
 
@@ -75,25 +74,25 @@ class CurveMethod:
             energy = torch.sum(squared_image_distances)
             return energy
         
+        else : # Several decoders
+            total_energy = 0
 
-        total_energy = 0
+            for i_idx in range(N - 1):
+                
+                l_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
+                k_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
 
-        for i_idx in range(N - 1):
-            
-            l_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
-            k_idx = np.random.randint(0, decoders.num_decoders, size=(montecarlo_sample,))
+                # f_l(c(t_i))
+                img_i = reconstructions[l_idx, i_idx]
+                # f_k(c(t_{i+1}))
+                img_next = reconstructions[k_idx, i_idx + 1]
 
-            # f_l(c(t_i))
-            img_i = reconstructions[l_idx, i_idx]
-            # f_k(c(t_{i+1}))
-            img_next = reconstructions[k_idx, i_idx + 1]
+                diffs = (img_i - img_next).view(montecarlo_sample, -1)
+                squared_distances = torch.sum(diffs**2, dim=1)
 
-            diffs = (img_i - img_next).view(montecarlo_sample, -1)
-            squared_distances = torch.sum(diffs**2, dim=1)
+                total_energy += torch.mean(squared_distances)
 
-            total_energy += torch.mean(squared_distances)
-
-        return total_energy
+            return total_energy
 
 class Piecewise(CurveMethod):
     def __init__(self, x1, x2, N=10, device='cpu', dim=2):
@@ -154,7 +153,7 @@ class PolynomialCurve(CurveMethod):
 
 
 
-def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics_to_plot, output_filename=None, seed=None, three_d=False):
+def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, num_iterations, lr, N, num_geodesics, output_filename=None, seed=None, three_d=False):
     """
     Calculates and plots geodesics on the latent space of a VAE.
 
@@ -166,7 +165,7 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         num_iterations (int): Number of optimization iterations.
         lr (float): Learning rate for the optimizer.
         N (int): Number of intermediate points or coefficients for the curve method.
-        num_geodesics_to_plot (int): Number of geodesics to calculate and plot.
+        num_geodesics (int): Number of geodesics to calculate and plot.
         output_filename (str, optional): If provided, saves the plot to this file (2D only).
         seed (int, optional): Random seed for reproducibility.
         three_d (bool): If True, plots in 3D with L2 norm as Z-axis. If False, plots in 2D.
@@ -202,7 +201,7 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         cbar.set_label('L2 Norm of Reconstructed Image')
 
     # 2. Generate random latent points for all start and end points of the geodesics
-    all_latent_points = torch.randn(2 * num_geodesics_to_plot, latent_dim, device=device)
+    all_latent_points = torch.randn(2 * num_geodesics, latent_dim, device=device)
 
     if not three_d:
         # Plot all sampled latent points (2D only)
@@ -219,7 +218,7 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
     # 4. Calculate and Plot Geodesics
     first_geodesic_plotted = False # Flag to ensure 'Optimized Geodesics' label appears only once in legend
     
-    for i in tqdm(range(num_geodesics_to_plot), desc="Calculating Geodesics"):
+    for i in tqdm(range(num_geodesics), desc="Calculating Geodesics"):
         x1 = all_latent_points[2 * i]
         x2 = all_latent_points[2 * i + 1]
 
@@ -278,7 +277,7 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         )
         fig.show()
     else:
-        plt.title(f'{num_geodesics_to_plot} Geodesics between Random Pairs with {curve_method_str} and VAE Decoder')
+        plt.title(f'{num_geodesics} Geodesics between Random Pairs with {curve_method_str} and VAE Decoder')
         plt.xlabel('x-axis')
         plt.ylabel('y-axis')
         plt.legend()
@@ -291,137 +290,10 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
 
         plt.show()
 
-def compute_cov_matrix(D):
-    """
-    Calculates CoV matrix
-
-    # D shape: (M, N, N) 
-        M: Ensemble Count
-        N: Number of points
-    """
-    mean = D.mean(axis=0)
-    std  = D.std(axis=0)
-    cov = np.divide(std, mean, out=np.zeros_like(std), where=mean!=0)
-    cov = std/mean
-
-    return cov
-
-def generate_dist_mat(
-    z, N, models,
-    curve_method_str="piecewise",
-    num_curve=100,
-    num_iter=1000,
-    lr=1e-3,
-    full_matrix=0,
-    device='cpu'
-):
-    num_models_per_D = len(models)
-    dist_mat = np.zeros((num_models_per_D, N, N))
-    energy_start_mat = np.full((num_models_per_D, N, N), np.nan)
-    energy_end_mat = np.full((num_models_per_D, N, N), np.nan)
-    energy_min_mat = np.full((num_models_per_D, N, N), np.nan)
-    energy_mean_mat = np.full((num_models_per_D, N, N), np.nan)
-
-    total_pairs = N * (N - 1) // 2
-
-    for m in tqdm(range(num_models_per_D), desc="Models"):
-        pair_bar = tqdm(total=total_pairs, desc=f"Pairs (model {m+1}/{num_models_per_D})", leave=False)
-
-        for i in range(N):
-            for j in range(i + 1, N):
-                meta = compute_geodesic(
-                    z[i], z[j], models[m],
-                    curve_method_str=curve_method_str,
-                    num_curve=num_curve,
-                    num_iter=num_iter,
-                    lr=lr,
-                    device=device,
-                    return_metadata=True
-                )
-
-                dist_mat[m, i, j] = meta["distance"]
-                energy_start_mat[m, i, j] = meta["energy_start"]
-                energy_end_mat[m, i, j] = meta["energy_end"]
-                energy_min_mat[m, i, j] = meta["energy_min"]
-                energy_mean_mat[m, i, j] = meta["energy_mean"]
-
-                pair_bar.update(1)
-
-        pair_bar.close()
-
-        if full_matrix:
-            dist_mat[m] = dist_mat[m] + dist_mat[m].T
-            energy_start_mat[m] = energy_start_mat[m] + energy_start_mat[m].T
-            energy_end_mat[m] = energy_end_mat[m] + energy_end_mat[m].T
-            energy_min_mat[m] = energy_min_mat[m] + energy_min_mat[m].T
-            energy_mean_mat[m] = energy_mean_mat[m] + energy_mean_mat[m].T
-
-    return {
-        "dist_mat": dist_mat,
-        "energy_start_mat": energy_start_mat,
-        "energy_end_mat": energy_end_mat,
-        "energy_min_mat": energy_min_mat,
-        "energy_mean_mat": energy_mean_mat
-    }
-
-def cov_matrix_stats(
-    z, models,
-    N=10,
-    num_curve=100,
-    num_iter=1000,
-    lr=1e-3,
-    curve_method_str="piecewise",
-    device='cpu'
-):
-    results = generate_dist_mat(
-        z=z,
-        N=N,
-        models=models,
-        curve_method_str=curve_method_str,
-        num_curve=num_curve,
-        num_iter=num_iter,
-        lr=lr,
-        device=device
-    )
-
-    dist_mat = results["dist_mat"]
-    cov = compute_cov_matrix(dist_mat)
-
-    mask = np.triu(np.ones((N, N), dtype=bool), k=1)
-
-    dist_vals = dist_mat[:, mask]
-    cov_vals = cov[mask]
-    energy_start_vals = results["energy_start_mat"][:, mask]
-    energy_end_vals = results["energy_end_mat"][:, mask]
-    energy_min_vals = results["energy_min_mat"][:, mask]
-    energy_mean_vals = results["energy_mean_mat"][:, mask]
-
-    summary = {
-        "dist_mean": float(np.nanmean(dist_vals)),
-        "dist_std": float(np.nanstd(dist_vals)),
-        "cov_mean": float(np.nanmean(cov_vals)),
-        "cov_std": float(np.nanstd(cov_vals)),
-        "energy_start_mean": float(np.nanmean(energy_start_vals)),
-        "energy_start_std": float(np.nanstd(energy_start_vals)),
-        "energy_end_mean": float(np.nanmean(energy_end_vals)),
-        "energy_end_std": float(np.nanstd(energy_end_vals)),
-        "energy_min_mean": float(np.nanmean(energy_min_vals)),
-        "energy_min_std": float(np.nanstd(energy_min_vals)),
-        "energy_mean_mean": float(np.nanmean(energy_mean_vals)),
-        "energy_mean_std": float(np.nanstd(energy_mean_vals)),
-        "pair_count": int(mask.sum()),
-        "M": len(models),
-        "N": N,
-        "dist_mat": dist_mat,
-        "cov_mat": cov
-    }
-
-    return summary
-
 def compute_geodesic(
     z1, z2, model,
     curve_method_str="piecewise",
-    num_curve=100,
+    number_parameters_geodesic=100,
     num_iter=100,
     lr=1e-3,
     device='cpu',
@@ -457,7 +329,7 @@ def compute_geodesic(
 
     curve_method = curve_class(
         z1, z2,
-        N=num_curve,
+        N=number_parameters_geodesic,
         device=device,
         dim=model.prior.latent_dim
     )
@@ -493,51 +365,3 @@ def compute_geodesic(
     if return_metadata:
         return meta
     return dist
-
-if __name__ == "__main__":
-    # 1. Setup
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}\n")
-
-    # 1.1. Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Optimize a curve's energy using different metrics and curve representations.")
-    parser.add_argument('--vae_model_path', type=str, default='experiment/model.pt',
-                        help='Path to the trained VAE model state_dict.')
-    parser.add_argument('--latent-dim', type=int, default=2, help='Dimension of the VAE latent space (latent_dim).')
-    parser.add_argument('--curve_method', type=str, default='piecewise', choices=['piecewise', 'polynomial'],
-                        help='Choose the curve representation: "piecewise" (Piecewise) or "polynomial" (Polynomial_3).')
-    parser.add_argument('--num_iterations', type=int, default=300,
-                        help='Number of optimization iterations.')
-    parser.add_argument('--lr', type=float, default=0.05,
-                        help='Learning rate for the optimizer.')
-    parser.add_argument('--N', type=int, default=30,
-                        help='Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic).')
-    parser.add_argument('--num_geodesics_to_plot', type=int, default=25,
-                        help='Number of geodesics (pairs of points) to calculate and plot.')
-    parser.add_argument('--output_filename', type=str, default='geodesics_standalone.png',
-                        help='Filename to save the plot.')
-    parser.add_argument('--seed', type=int, default=None,
-                        help='Random seed for reproducibility.')
-    parser.add_argument('--three_d', action='store_true',
-                        help='If set, plots geodesics in 3D with L2 norm as Z-axis.')
-
-    args = parser.parse_args()
-
-    # 1.2. Load VAE model
-    from ensemble_vae import vae_load
-    model, parameters = vae_load(args.vae_model_path, device)
-    latent_dim = parameters['latent_dim']
-    
-    calculate_and_plot_geodesics(
-        model=model,
-        device=device,
-        latent_dim=latent_dim,
-        curve_method_str=args.curve_method,
-        num_iterations=args.num_iterations,
-        lr=args.lr,
-        N=args.N,
-        num_geodesics_to_plot=args.num_geodesics_to_plot,
-        output_filename=args.output_filename,
-        seed=args.seed,
-        three_d=args.three_d
-    )

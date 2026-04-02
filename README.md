@@ -105,5 +105,5 @@ The plot will be displayed and saved as `geodesics.png`.
 
 4.  **Plot covariance matrix:**
     ```bash
-    python ensemble_vae.py plot_cov --experiment-folder cav_models --D 1 2 3 --M 10 --num-curves 10 --cov-methods euclidean piecewise --cov-output-file cov_plot.pdf
+    python ensemble_vae.py covariance --experiment-folder cav_models --D 1 2 3 --M 10 --num-geodesics 10 --N 10 --num-iterations 300 --cov-methods euclidean piecewise --cov-output-file cov_plot.pdf --device cuda
     ```

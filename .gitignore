@@ -1,6 +1,7 @@
 data/
 exp/
 experiment/
+cav_test/
 __pycache__/
 .vscode/
 runs.txt
