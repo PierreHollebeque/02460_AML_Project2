@@ -278,12 +278,14 @@ def calculate_and_plot_geodesics(model, device, latent_dim, curve_method_str, nu
         fig.show()
     else:
         plt.title(f'{num_geodesics} Geodesics between Random Pairs with {curve_method_str} and VAE Decoder')
+        plt.xlim(-4, 4)
+        plt.ylim(-4, 4)
         plt.xlabel('x-axis')
         plt.ylabel('y-axis')
-        plt.legend()
+        plt.legend(loc='upper right', framealpha=0.8, frameon=True, fontsize='small')
         plt.grid(True, linestyle='--', alpha=0.6)
-        plt.axis('equal')
-
+        # plt.axis('equal')
+        plt.tight_layout()
         if output_filename:
             plt.savefig(output_filename)
             print(f"Plot saved to {output_filename}")

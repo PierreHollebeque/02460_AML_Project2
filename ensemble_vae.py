@@ -285,7 +285,13 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
+# Load a subset of MNIST and create data loaders
+def subsample(data, targets, num_data, num_classes):
+    idx = targets < num_classes
+    new_data = data[idx][:num_data].unsqueeze(1).to(torch.float32) / 255
+    new_targets = targets[idx][:num_data]
 
+    return torch.utils.data.TensorDataset(new_data, new_targets)
 
 if __name__ == "__main__":
     from torchvision import datasets, transforms
@@ -441,13 +447,6 @@ if __name__ == "__main__":
 
     device = args.device
 
-    # Load a subset of MNIST and create data loaders
-    def subsample(data, targets, num_data, num_classes):
-        idx = targets < num_classes
-        new_data = data[idx][:num_data].unsqueeze(1).to(torch.float32) / 255
-        new_targets = targets[idx][:num_data]
-
-        return torch.utils.data.TensorDataset(new_data, new_targets)
 
     num_train_data = 2048
     num_classes = 3
