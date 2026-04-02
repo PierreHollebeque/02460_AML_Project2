@@ -5,3 +5,5 @@ cav_test/
 __pycache__/
 .vscode/
 runs.txt
+cav_models/cov_plot.pdf
+cav_models/cov_results.csv
