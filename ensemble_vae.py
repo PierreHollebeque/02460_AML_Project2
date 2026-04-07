@@ -10,12 +10,9 @@ import torch
 import torch.nn as nn
 import torch.distributions as td
 import torch.utils.data
-import numpy as np
 from tqdm import tqdm
-from copy import deepcopy
 import os
-import math
-import matplotlib.pyplot as plt
+
 
 class GaussianPrior(nn.Module):
     def __init__(self, latent_dim):
@@ -252,10 +249,19 @@ def train(model, optimizer, data_loader, epochs, device):
         eps = std * torch.randn_like(x)
         return torch.clamp(x + eps, min=0.0, max=1.0)
 
+    data_iter = iter(data_loader)
+
     with tqdm(range(num_steps)) as pbar:
         for step in pbar:
             try:
-                x = next(iter(data_loader))[0]
+                #x = next(iter(data_loader))[0] #pretty sure this reinitializes so it will always run 1st batch.
+
+                try:
+                    x = next(data_iter)[0] #I think this should correcly run through batches
+                except StopIteration:
+                    data_iter = iter(data_loader)
+                    x = next(data_iter)[0]
+                
                 x = noise(x.to(device))
                 model = model
                 optimizer.zero_grad()
@@ -279,89 +285,13 @@ def train(model, optimizer, data_loader, epochs, device):
                 )
                 break
 
-def plot_cov(all_models, D_values, device, N=10, num_curve=100, num_iter=100, lr=1e-3, methods=("euclidian", "piecewise")):
-    """
-    Plots the average CoV against the number of decoders.
+# Load a subset of MNIST and create data loaders
+def subsample(data, targets, num_data, num_classes):
+    idx = targets < num_classes
+    new_data = data[idx][:num_data].unsqueeze(1).to(torch.float32) / 255
+    new_targets = targets[idx][:num_data]
 
-    N: Number of points
-    all_models: list containing lists of M models (ensemble).
-    methods: desired training methods to plot
-    *everything else: training parameters
-    """
-
-    import seaborn as sns
-    from geodesics import compute_avg
-    sns.set_style("whitegrid")
-    sns.set_context("paper")
-    
-    latent_dim = all_models[0][0].prior.latent_dim #get dimension of z
-
-    z = torch.randn(N, latent_dim, device=device) #random latent points
-
-    cov_avg = np.zeros((len(D_values), len(methods)))
-
-    plt.figure(figsize=(5.5, 3.5))
-    for i,method in enumerate(methods):
-        for d in D_values:
-            cov_avg[d-1,i] = compute_avg(z,all_models[d-1],N,num_curve,num_iter,lr,method)
-        plt.plot(D_values, cov_avg[:, i], marker="o", label=method)
-    
-    plt.xlabel("Number of decoders")
-    plt.ylabel("Average CoV")
-    plt.title("CoV of latent distances")
-    plt.legend()
-    plt.xticks(D_values)
-    plt.tight_layout()
-
-    plt.show()
-    
-    return
-
-def load_models_for_cov(root_folder, D_values, M, device):
-    print(f"\n[INFO] Loading models from root folder: {root_folder}")
-    print(f"[INFO] Target decoder counts D: {D_values}")
-    print(f"[INFO] Models per D (M): {M}\n")
-
-    all_models = []
-
-    for d in D_values:
-        subfolder = os.path.join(root_folder, f"{d}_decoders")
-        print(f"[INFO] Checking folder: {subfolder}")
-
-        if not os.path.isdir(subfolder):
-            raise FileNotFoundError(f"[ERROR] Missing folder: {subfolder}")
-
-        all_files = sorted(os.listdir(subfolder))
-        model_files = [f for f in all_files if f.endswith(".pt")]
-
-        print(f"[INFO] Found {len(model_files)} .pt files")
-
-        model_files = model_files[:M]
-
-        if len(model_files) < M:
-            raise ValueError(
-                f"[ERROR] Folder {subfolder} only contains {len(model_files)} model files, but M={M}"
-            )
-
-        print(f"[INFO] Using files: {model_files}")
-
-        models_d = []
-        for i, fname in enumerate(model_files):
-            model_path = os.path.join(subfolder, fname)
-            print(f"[LOAD] ({i+1}/{M}) Loading: {model_path}")
-
-            model, _ = vae_load(model_path, device)
-            model.eval()
-
-            models_d.append(model)
-
-        print(f"[DONE] Loaded {len(models_d)} models for D={d}\n")
-
-        all_models.append(models_d)
-
-    print("[SUCCESS] Finished loading all models.\n")
-    return all_models
-
+    return torch.utils.data.TensorDataset(new_data, new_targets)
 
 if __name__ == "__main__":
     from torchvision import datasets, transforms
@@ -369,153 +299,146 @@ if __name__ == "__main__":
 
     # Parse arguments
     import argparse
-
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "mode",
+    parser.add_argument("mode",
         type=str,
         default="train",
-        choices=["train", "sample", "eval", "geodesics", "plot_cov"],
+        choices=["train", "sample", "eval", "geodesics", "covariance"],
         help="what to do when running the script (default: %(default)s)",
     )
-    parser.add_argument(
-        "--experiment-folder",
+    parser.add_argument("--experiment-folder",
         type=str,
         default="experiment",
         help="folder to save and load experiment results in (default: %(default)s)",
     )
 
-    parser.add_argument(
-        "--model-name",
+    parser.add_argument("--model-name",
         type=str,
         default="model.pt",
         help="name of the model file (default: %(default)s)",
     )
 
 
-    parser.add_argument(
-        "--samples",
+    parser.add_argument("--samples",
         type=str,
         default="samples.png",
         help="file to save samples in (default: %(default)s)",
     )
 
-    parser.add_argument(
-        "--device",
+    parser.add_argument("--device",
         type=str,
         default="cpu",
         choices=["cpu", "cuda", "mps"],
         help="torch device (default: %(default)s)",
     )
-    parser.add_argument(
-        "--batch-size",
+    parser.add_argument("--batch-size",
         type=int,
         default=32,
         metavar="N",
         help="batch size for training (default: %(default)s)",
     )
-    parser.add_argument(
-        "--epochs-per-decoder",
+    parser.add_argument("--epochs-per-decoder",
         type=int,
         default=50,
         metavar="N",
         help="number of training epochs per each decoder (default: %(default)s)",
     )
-    parser.add_argument(
-        "--latent-dim",
+    parser.add_argument("--latent-dim",
         type=int,
         default=2,
         metavar="N",
         help="dimension of latent variable (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-decoders",
+    parser.add_argument("--num-decoders",
         type=int,
         default=1,
         metavar="N",
         help="number of decoders in the ensemble (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-reruns",
+    parser.add_argument("--num-reruns",
         type=int,
         default=10,
         metavar="N",
         help="number of reruns (default: %(default)s)",
     )
-    parser.add_argument(
-        "--num-curves",
+
+    # Arguments for geodesics calculation
+    parser.add_argument("--num-geodesics",
         type=int,
         default=10,
         metavar="N",
-        help="number of geodesics to plot (default: %(default)s)",
+        help="number of geodesics or number of latent points to sample for the covariance matrix calculation (default: %(default)s)",
     )
 
-    # Arguments for geodesics calculation
-    parser.add_argument(
-        "--N",
+    parser.add_argument("--N",
         type=int,
-        default=30,
-        metavar="N",
-        help="Number of intermediate points for Piecewise or coefficients for Polynomial_3 (N=2 for cubic). (default: %(default)s)",
+        nargs="+", # Allow multiple integer values
+        default=[10], # Default now a list for consistency with nargs="+"
+        metavar="N_VAL",
+        help="Number of intermediate points for Piecewise or coefficients for Polynomial. "
+             "For 'covariance' mode, provide a list matching --cov-methods length. "
+             "For 'geodesics' mode, only the first value is used. (default: %(default)s)",
     )
-    parser.add_argument(
-        "--seed-geo",
+    parser.add_argument("--seed-geo",
         type=int,
         default=0,
         metavar="N",
         help="Seed for geodesics calculation (default: %(default)s)",
     )
-    parser.add_argument(
-        '--curve-method', 
+    parser.add_argument("--curve-method", 
         type=str, 
-        default='piecewise', 
-        choices=['piecewise', 'polynomial'],
-        help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)'
+        default="piecewise", 
+        choices=["piecewise", "polynomial"],
+        help='Choose the curve representation for geodesics: "piecewise" or "polynomial". (default: %(default)s)',
     )
-    parser.add_argument(
-        '--num-iterations', 
+    parser.add_argument("--num-iterations", 
         type=int, 
         default=300,
-        help='Number of optimization iterations for geodesics. (default: %(default)s)'
+        help="Number of optimization iterations for geodesics. (default: %(default)s)"
     )
-    parser.add_argument(
-        '--lr', 
+    parser.add_argument("--lr", 
         type=float, 
         default=0.05,
-        help='Learning rate for the geodesic optimizer. (default: %(default)s)'
+        help="Learning rate for the geodesic optimizer. (default: %(default)s)"
     )
-    parser.add_argument(
-        "--output-file",
+    parser.add_argument("--output-file",
         type=str,
         default="geodesics.png",
         help="file to save the geodesics plot in (default: %(default)s)",
     )
-    parser.add_argument(
-    "--M",
-    type=int,
-    default=10,
-    help="Number of rerun models to load per decoder count for plot_cov."
+    parser.add_argument("--M",
+        type=int,
+        default=10,
+        help="Number of rerun models to load per decoder count for covariance calculation."
     )
 
-    parser.add_argument(
-        "--D",
+    parser.add_argument("--D",
         type=int,
         nargs="+",
         default=[1, 2, 3],
-        help="Decoder counts to include in plot_cov, e.g. --D 1 2 3"
+        help="Decoder counts to include in covariance calculation, e.g. --D 1 2 3"
     )
 
-    parser.add_argument(
-        "--cov-methods",
+    parser.add_argument("--cov-csv-file",
+        type=str,
+        default="cov_results.csv",
+        help="file to save the CoV statistics CSV in (default: %(default)s)",
+    )
+
+    parser.add_argument("--cov-methods",
         type=str,
         nargs="+",
-        default=["euclidian", "piecewise"],
-        help='Methods for CoV plot, e.g. --cov-methods euclidian piecewise polynomial'
+        default=["euclidean", "piecewise"],
+        help="Methods for CoV plot, e.g. --cov-methods euclidean piecewise polynomial"
     )
-    parser.add_argument(
-        "--three-dim",
-        action='store_true', # Changed type=bool to action='store_true' for correct boolean parsing
+    parser.add_argument("--three-dim",
+        action="store_true", # Changed type=bool to action="store_true" for correct boolean parsing
         help="Bool about whether to plot in 3d or not. (default: %(default)s)"
+    )
+    parser.add_argument("--cov-output-file",
+        type=str,
+        default="cov_plot.pdf",
+        help="file to save the CoV plot in as PDF (default: %(default)s)",
     )
     args = parser.parse_args()
     print("# Options")
@@ -524,13 +447,6 @@ if __name__ == "__main__":
 
     device = args.device
 
-    # Load a subset of MNIST and create data loaders
-    def subsample(data, targets, num_data, num_classes):
-        idx = targets < num_classes
-        new_data = data[idx][:num_data].unsqueeze(1).to(torch.float32) / 255
-        new_targets = targets[idx][:num_data]
-
-        return torch.utils.data.TensorDataset(new_data, new_targets)
 
     num_train_data = 2048
     num_classes = 3
@@ -631,21 +547,26 @@ if __name__ == "__main__":
         calculate_and_plot_geodesics(
             model=model,
             device=device,
-            latent_dim=parameters['latent_dim'],
+            latent_dim=parameters["latent_dim"],
             curve_method_str=args.curve_method,
             num_iterations=args.num_iterations,
             lr=args.lr,
-            N=args.N,
-            num_geodesics_to_plot=args.num_curves,
+            N=args.N[0], # For geodesics mode, use the first N value
+            num_geodesics=args.num_geodesics,
             output_filename=args.experiment_folder + "/" +args.output_file,
             seed=args.seed_geo,
             three_d=args.three_dim
         )
-    elif args.mode == "plot_cov":
+    elif args.mode == "covariance":
+        from covariance import plot_cov, load_models_for_cov
+        if len(args.N) != len(args.cov_methods):
+            raise ValueError(
+                f"The number of N values ({len(args.N)}) must match the number of covariance methods ({len(args.cov_methods)})."
+            )
         all_models = load_models_for_cov(
             root_folder=args.experiment_folder,
             D_values=args.D,
-            M=args.M,
+            num_models_per_D=args.M,
             device=device
         )
 
@@ -653,9 +574,11 @@ if __name__ == "__main__":
             all_models=all_models,
             D_values=args.D,
             device=device,
-            N=args.N,
-            num_curve=args.num_curves,
+            num_latent_points=args.num_geodesics, # Number of latent points for the covariance matrix
+            number_parameters_geodesic_list=args.N,
             num_iter=args.num_iterations,
             lr=args.lr,
-            methods=args.cov_methods
+            methods=args.cov_methods,
+            output_file=os.path.join(args.experiment_folder, args.cov_output_file),
+            csv_file=os.path.join(args.experiment_folder, args.cov_csv_file)
         )

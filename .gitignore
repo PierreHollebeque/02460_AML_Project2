@@ -1,4 +1,7 @@
 data/
+*.sh
 exp/
 experiment/
+cav_test/
 __pycache__/
+.vscode/

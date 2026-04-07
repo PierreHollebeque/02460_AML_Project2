@@ -95,10 +95,15 @@ The plot will be displayed and saved as `geodesics.png`.
 
 2.  **Plotting 25 curves with more iterations and saving to a custom file:**
     ```bash
-    python ensemble_vae.py geodesics --experiment-folder experiment --num-curves 25 --num-iterations 500 --output-file detailed_geodesics.png
+    python ensemble_vae.py geodesics --experiment-folder experiment --N 25 --num-iterations 500 --output-file detailed_geodesics.png
     ```
 
 3.  **Using a specific seed for reproducibility:**
     ```bash
-    python ensemble_vae.py geodesics --experiment-folder experiment --num-curves 25 --seed-geo 42
+    python ensemble_vae.py geodesics --curve-method piecewise --experiment-folder cav_models/1_decoders --model-name model_1.pt --N 25 --num-iterations 500 --seed-geo 42
+    ```
+
+4.  **Plot covariance matrix:**
+    ```bash
+    python ensemble_vae.py covariance --experiment-folder cav_models --D 1 2 3 --M 10 --num-geodesics 10 --N 10 20 4 --num-iterations 200 --cov-methods euclidean piecewise polynomial --cov-output-file cov_plot.pdf --device cuda
     ```
